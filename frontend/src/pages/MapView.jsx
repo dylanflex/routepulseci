@@ -1,0 +1,157 @@
+import React, { useState } from "react";
+import { TrafficMap, TrafficLegend } from "@/components/routepulse/TrafficMap";
+import { INCIDENTS, INCIDENT_TYPES } from "@/lib/mockData";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat, MapPin, Clock, Users, Navigation, Share2 } from "lucide-react";
+import { toast } from "sonner";
+
+const iconMap = { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat };
+const FILTERS = [
+  { key: "all", label: "Tout", emoji: "🌐" },
+  { key: "jam", label: "Bouchons", emoji: "🚗" },
+  { key: "accident", label: "Accidents", emoji: "🚧" },
+  { key: "flood", label: "Inondations", emoji: "🌊" },
+  { key: "degraded", label: "Nids de poule", emoji: "🕳️" },
+  { key: "police", label: "Contrôles", emoji: "👮" },
+  { key: "works", label: "Travaux", emoji: "🚜" },
+];
+
+export default function MapView() {
+  const [filter, setFilter] = useState("all");
+  const [selected, setSelected] = useState(null);
+
+  return (
+    <div className="px-4 pt-4">
+      <div>
+        <h1 className="font-display text-2xl font-semibold text-foreground">Carte en direct</h1>
+        <p className="text-sm text-muted-foreground">Abidjan · mis à jour il y a 12 sec</p>
+      </div>
+
+      {/* Filters */}
+      <div className="mt-3 -mx-4 px-4 overflow-x-auto scrollbar-thin">
+        <div className="flex gap-2 pb-2">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                filter === f.key
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-card text-muted-foreground border-border hover:border-foreground/30"
+              }`}
+            >
+              <span className="mr-1">{f.emoji}</span>{f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Map card */}
+      <div className="mt-2 rounded-2xl overflow-hidden border border-border bg-card shadow-soft relative">
+        <div className="aspect-[3/4] sm:aspect-[4/3]">
+          <TrafficMap activeFilter={filter} onPickIncident={setSelected} />
+        </div>
+        {/* Legend overlay */}
+        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+          <div className="glass rounded-xl p-2"><TrafficLegend /></div>
+          <Button size="icon" className="h-10 w-10 rounded-full bg-card text-foreground hover:bg-card shadow-elevated border border-border">
+            <Navigation className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Incident list */}
+      <div className="mt-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-lg font-semibold">Alertes proches</h2>
+          <span className="text-xs text-muted-foreground">{INCIDENTS.length} résultats</span>
+        </div>
+        <div className="mt-3 space-y-2">
+          {INCIDENTS.filter((i) => filter === "all" || i.type === filter).map((i) => {
+            const meta = INCIDENT_TYPES[i.type];
+            const Icon = iconMap[meta.icon] || AlertTriangle;
+            return (
+              <button
+                key={i.id}
+                onClick={() => setSelected(i)}
+                className="w-full flex items-center gap-3 p-3 rounded-2xl bg-card border border-border hover:shadow-elevated transition-shadow text-left"
+              >
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: `hsl(var(--traffic-${i.severity}) / 0.15)`, color: `hsl(var(--traffic-${i.severity}))` }}
+                >
+                  <Icon className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm text-foreground truncate">{meta.label} · {i.road}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{i.time}</span>
+                    <span>·</span>
+                    <span className="inline-flex items-center gap-1"><Users className="w-3 h-3" />{i.confirmed} confirm.</span>
+                  </p>
+                </div>
+                <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide" style={{ borderColor: `hsl(var(--traffic-${i.severity}) / 0.4)`, color: `hsl(var(--traffic-${i.severity}))` }}>
+                  {i.severity}
+                </Badge>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Detail sheet */}
+      <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <SheetContent side="bottom" className="rounded-t-3xl max-h-[80vh]">
+          {selected && (() => {
+            const meta = INCIDENT_TYPES[selected.type];
+            const Icon = iconMap[meta.icon] || AlertTriangle;
+            return (
+              <>
+                <SheetHeader className="text-left">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: `hsl(var(--traffic-${selected.severity}) / 0.15)`, color: `hsl(var(--traffic-${selected.severity}))` }}>
+                      <Icon className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <SheetTitle className="font-display text-xl">{meta.label}</SheetTitle>
+                      <SheetDescription className="flex items-center gap-1.5 mt-0.5">
+                        <MapPin className="w-3.5 h-3.5" /> {selected.road} · {selected.time}
+                      </SheetDescription>
+                    </div>
+                  </div>
+                </SheetHeader>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <div className="p-3 rounded-xl bg-muted/60">
+                    <p className="text-xs text-muted-foreground">Gravité</p>
+                    <p className="font-semibold uppercase text-sm" style={{ color: `hsl(var(--traffic-${selected.severity}))` }}>{selected.severity}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-muted/60">
+                    <p className="text-xs text-muted-foreground">Confirmations</p>
+                    <p className="font-semibold text-sm text-foreground">{selected.confirmed}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-muted/60">
+                    <p className="text-xs text-muted-foreground">Impact</p>
+                    <p className="font-semibold text-sm text-foreground">+18 min</p>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
+                  Les utilisateurs à proximité rapportent une {meta.label.toLowerCase()} confirmée. Une déviation par la voie parallèle est conseillée. Rejoins la discussion dans le fil.
+                </p>
+                <div className="mt-5 flex gap-2">
+                  <Button className="flex-1 rounded-xl bg-foreground text-background" onClick={() => toast.success("Confirmation envoyée 💪")}>
+                    Confirmer
+                  </Button>
+                  <Button variant="outline" className="flex-1 rounded-xl" onClick={() => toast("Lien copié 🔗")}>
+                    <Share2 className="w-4 h-4 mr-2" /> Partager
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
