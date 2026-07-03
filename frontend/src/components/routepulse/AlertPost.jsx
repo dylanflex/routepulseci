@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Heart, MessageCircle, Share2, Flag, ShieldCheck, MapPin, MoreHorizontal, Bookmark } from "lucide-react";
 import { INCIDENT_TYPES, TRAFFIC_LEVELS } from "@/lib/mockData";
+import { trafficColorVar } from "@/lib/traffic";
+import { useAppData } from "@/context/AppDataContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -10,15 +12,15 @@ import { useNavigate } from "react-router-dom";
 
 export const AlertPost = ({ post, compact = false }) => {
   const [liked, setLiked] = useState(false);
-  const [likes, setLikes] = useState(post.likes);
   const [saved, setSaved] = useState(false);
   const navigate = useNavigate();
+  const { likePost, confirmPost } = useAppData();
   const meta = INCIDENT_TYPES[post.type];
   const severity = TRAFFIC_LEVELS[post.severity];
 
   const handleLike = () => {
+    likePost(post.id, liked ? -1 : 1);
     setLiked(!liked);
-    setLikes(liked ? likes - 1 : likes + 1);
   };
 
   const handleShare = () => {
@@ -30,6 +32,7 @@ export const AlertPost = ({ post, compact = false }) => {
   };
 
   const handleConfirm = () => {
+    confirmPost(post.id);
     toast.success("Alerte confirmée ✅", { description: "Merci, tu aides à fiabiliser l'info." });
   };
 
@@ -72,7 +75,7 @@ export const AlertPost = ({ post, compact = false }) => {
       <div className="flex items-center gap-2 px-4 pb-2">
         <div
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
-          style={{ backgroundColor: `hsl(var(--traffic-${post.severity}) / 0.12)`, color: `hsl(var(--traffic-${post.severity}))` }}
+          style={{ backgroundColor: trafficColorVar(post.severity, 0.12), color: trafficColorVar(post.severity) }}
         >
           <span className="text-sm leading-none">{meta.emoji}</span>
           <span>{meta.label}</span>
@@ -100,7 +103,7 @@ export const AlertPost = ({ post, compact = false }) => {
       <div className="flex items-center gap-1 mt-auto p-2 pt-3 border-t border-border/60 mx-2">
         <Button variant="ghost" size="sm" onClick={handleLike} className={`flex-1 gap-1.5 rounded-xl ${liked ? "text-primary" : "text-muted-foreground"}`}>
           <Heart className={`w-4 h-4 ${liked ? "fill-primary" : ""}`} />
-          <span className="text-xs font-medium">{likes}</span>
+          <span className="text-xs font-medium">{post.likes}</span>
         </Button>
         <Button variant="ghost" size="sm" onClick={() => navigate(`/app/feed/${post.id}`)} className="flex-1 gap-1.5 rounded-xl text-muted-foreground">
           <MessageCircle className="w-4 h-4" />

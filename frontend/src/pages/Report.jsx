@@ -1,14 +1,14 @@
 import React, { useState } from "react";
 import { INCIDENT_TYPES, TRAFFIC_LEVELS } from "@/lib/mockData";
-import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat, Camera, MapPin, Zap, Sparkles, Check } from "lucide-react";
+import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { Camera, MapPin, Zap, Sparkles, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-
-const iconMap = { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat };
+import { useAppData } from "@/context/AppDataContext";
 
 export default function Report() {
   const [step, setStep] = useState(1);
@@ -18,11 +18,13 @@ export default function Report() {
   const [postToFeed, setPostToFeed] = useState(true);
   const [sent, setSent] = useState(false);
   const navigate = useNavigate();
+  const { submitReport } = useAppData();
 
   const submit = () => {
+    submitReport({ type, severity, note, postToFeed });
     setSent(true);
     toast.success("Alerte envoyée ⚡", { description: "Merci, ta ville te remercie !" });
-    setTimeout(() => navigate("/app/feed"), 1600);
+    setTimeout(() => navigate(postToFeed ? "/app/feed" : "/app/carte"), 1600);
   };
 
   return (
@@ -67,7 +69,7 @@ export default function Report() {
             <p className="mt-6 text-sm font-medium text-foreground">1. Que se passe-t-il ?</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               {Object.entries(INCIDENT_TYPES).map(([key, meta]) => {
-                const Icon = iconMap[meta.icon] || AlertTriangle;
+                const Icon = getIncidentIcon(meta.icon);
                 const active = type === key;
                 return (
                   <button
@@ -103,7 +105,7 @@ export default function Report() {
                     key={key}
                     onClick={() => setSeverity(key)}
                     className={`p-4 rounded-2xl border text-left transition-all ${active ? "border-foreground" : "border-border"}`}
-                    style={active ? { borderColor: `hsl(var(--traffic-${key}))`, background: `hsl(var(--traffic-${key}) / 0.06)` } : {}}
+                    style={active ? { borderColor: trafficColorVar(key), background: trafficColorVar(key, 0.06) } : {}}
                   >
                     <div className="flex items-center gap-2">
                       <span className="w-3 h-3 rounded-full" style={{ background: val.hex }} />

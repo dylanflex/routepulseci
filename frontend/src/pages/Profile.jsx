@@ -4,10 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatChip } from "@/components/routepulse/StatChip";
 import { Flame, Award, MapPin, Bell, Settings, Shield, ChevronRight, Zap, ShieldCheck, Heart } from "lucide-react";
-import { POSTS } from "@/lib/mockData";
+import { useAppData } from "@/context/AppDataContext";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 
 export default function Profile() {
+  const { posts } = useAppData();
   return (
     <div className="pt-4 pb-20">
       <div className="px-4">
@@ -105,7 +106,7 @@ export default function Profile() {
       <div className="px-4 mt-6">
         <h2 className="font-display text-lg font-semibold">Tes derniers signalements</h2>
         <div className="mt-3 space-y-3">
-          <AlertPost post={POSTS[0]} />
+          <AlertPost post={posts[0]} />
         </div>
       </div>
     </div>

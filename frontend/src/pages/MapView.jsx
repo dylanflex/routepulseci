@@ -1,13 +1,14 @@
 import React, { useState } from "react";
 import { TrafficMap, TrafficLegend } from "@/components/routepulse/TrafficMap";
-import { INCIDENTS, INCIDENT_TYPES } from "@/lib/mockData";
+import { INCIDENT_TYPES } from "@/lib/mockData";
+import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { useAppData } from "@/context/AppDataContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat, MapPin, Clock, Users, Navigation, Share2 } from "lucide-react";
+import { MapPin, Clock, Users, Navigation, Share2 } from "lucide-react";
 import { toast } from "sonner";
 
-const iconMap = { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat };
 const FILTERS = [
   { key: "all", label: "Tout", emoji: "🌐" },
   { key: "jam", label: "Bouchons", emoji: "🚗" },
@@ -20,7 +21,9 @@ const FILTERS = [
 
 export default function MapView() {
   const [filter, setFilter] = useState("all");
-  const [selected, setSelected] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const { incidents, confirmIncident } = useAppData();
+  const selected = incidents.find((i) => i.id === selectedId) || null;
 
   return (
     <div className="px-4 pt-4">
@@ -51,7 +54,7 @@ export default function MapView() {
       {/* Map card */}
       <div className="mt-2 rounded-2xl overflow-hidden border border-border bg-card shadow-soft relative">
         <div className="aspect-[3/4] sm:aspect-[4/3]">
-          <TrafficMap activeFilter={filter} onPickIncident={setSelected} />
+          <TrafficMap activeFilter={filter} onPickIncident={(i) => setSelectedId(i.id)} />
         </div>
         {/* Legend overlay */}
         <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
@@ -66,21 +69,21 @@ export default function MapView() {
       <div className="mt-5">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-semibold">Alertes proches</h2>
-          <span className="text-xs text-muted-foreground">{INCIDENTS.length} résultats</span>
+          <span className="text-xs text-muted-foreground">{incidents.length} résultats</span>
         </div>
         <div className="mt-3 space-y-2">
-          {INCIDENTS.filter((i) => filter === "all" || i.type === filter).map((i) => {
+          {incidents.filter((i) => filter === "all" || i.type === filter).map((i) => {
             const meta = INCIDENT_TYPES[i.type];
-            const Icon = iconMap[meta.icon] || AlertTriangle;
+            const Icon = getIncidentIcon(meta.icon);
             return (
               <button
                 key={i.id}
-                onClick={() => setSelected(i)}
+                onClick={() => setSelectedId(i.id)}
                 className="w-full flex items-center gap-3 p-3 rounded-2xl bg-card border border-border hover:shadow-elevated transition-shadow text-left"
               >
                 <div
                   className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `hsl(var(--traffic-${i.severity}) / 0.15)`, color: `hsl(var(--traffic-${i.severity}))` }}
+                  style={{ backgroundColor: trafficColorVar(i.severity, 0.15), color: trafficColorVar(i.severity) }}
                 >
                   <Icon className="w-5 h-5" />
                 </div>
@@ -92,7 +95,7 @@ export default function MapView() {
                     <span className="inline-flex items-center gap-1"><Users className="w-3 h-3" />{i.confirmed} confirm.</span>
                   </p>
                 </div>
-                <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide" style={{ borderColor: `hsl(var(--traffic-${i.severity}) / 0.4)`, color: `hsl(var(--traffic-${i.severity}))` }}>
+                <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide" style={{ borderColor: trafficColorVar(i.severity, 0.4), color: trafficColorVar(i.severity) }}>
                   {i.severity}
                 </Badge>
               </button>
@@ -102,16 +105,16 @@ export default function MapView() {
       </div>
 
       {/* Detail sheet */}
-      <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+      <Sheet open={!!selected} onOpenChange={(o) => !o && setSelectedId(null)}>
         <SheetContent side="bottom" className="rounded-t-3xl max-h-[80vh]">
           {selected && (() => {
             const meta = INCIDENT_TYPES[selected.type];
-            const Icon = iconMap[meta.icon] || AlertTriangle;
+            const Icon = getIncidentIcon(meta.icon);
             return (
               <>
                 <SheetHeader className="text-left">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: `hsl(var(--traffic-${selected.severity}) / 0.15)`, color: `hsl(var(--traffic-${selected.severity}))` }}>
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: trafficColorVar(selected.severity, 0.15), color: trafficColorVar(selected.severity) }}>
                       <Icon className="w-6 h-6" />
                     </div>
                     <div>
@@ -125,7 +128,7 @@ export default function MapView() {
                 <div className="mt-4 grid grid-cols-3 gap-2">
                   <div className="p-3 rounded-xl bg-muted/60">
                     <p className="text-xs text-muted-foreground">Gravité</p>
-                    <p className="font-semibold uppercase text-sm" style={{ color: `hsl(var(--traffic-${selected.severity}))` }}>{selected.severity}</p>
+                    <p className="font-semibold uppercase text-sm" style={{ color: trafficColorVar(selected.severity) }}>{selected.severity}</p>
                   </div>
                   <div className="p-3 rounded-xl bg-muted/60">
                     <p className="text-xs text-muted-foreground">Confirmations</p>
@@ -140,7 +143,7 @@ export default function MapView() {
                   Les utilisateurs à proximité rapportent une {meta.label.toLowerCase()} confirmée. Une déviation par la voie parallèle est conseillée. Rejoins la discussion dans le fil.
                 </p>
                 <div className="mt-5 flex gap-2">
-                  <Button className="flex-1 rounded-xl bg-foreground text-background" onClick={() => toast.success("Confirmation envoyée 💪")}>
+                  <Button className="flex-1 rounded-xl bg-foreground text-background" onClick={() => { confirmIncident(selected.id); toast.success("Confirmation envoyée 💪"); }}>
                     Confirmer
                   </Button>
                   <Button variant="outline" className="flex-1 rounded-xl" onClick={() => toast("Lien copié 🔗")}>

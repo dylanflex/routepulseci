@@ -2,15 +2,16 @@ import React, { useState } from "react";
 import { TrafficMap } from "@/components/routepulse/TrafficMap";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { INCIDENTS, INCIDENT_TYPES } from "@/lib/mockData";
-import { MapPin, ArrowRight, Clock, TrendingDown, AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat, Search, Route as RouteIcon } from "lucide-react";
-
-const iconMap = { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat };
+import { INCIDENT_TYPES } from "@/lib/mockData";
+import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { useAppData } from "@/context/AppDataContext";
+import { MapPin, ArrowRight, Clock, TrendingDown, AlertTriangle, Search, Route as RouteIcon } from "lucide-react";
 
 export default function Trajet() {
   const [from, setFrom] = useState("Cocody Riviera 3");
   const [to, setTo] = useState("Plateau, Immeuble CCIA");
   const [showResult, setShowResult] = useState(false);
+  const { incidents } = useAppData();
 
   return (
     <div className="px-4 pt-4">
@@ -68,15 +69,15 @@ export default function Trajet() {
               <AlertTriangle className="w-4 h-4 text-warning" /> Sur ton chemin
             </h3>
             <div className="mt-3 space-y-2">
-              {INCIDENTS.slice(0, 3).map((i, idx) => {
+              {incidents.slice(0, 3).map((i, idx) => {
                 const meta = INCIDENT_TYPES[i.type];
-                const Icon = iconMap[meta.icon] || AlertTriangle;
+                const Icon = getIncidentIcon(meta.icon);
                 return (
                   <div key={i.id} className="flex items-center gap-3 p-3 rounded-2xl bg-card border border-border">
                     <div className="font-display text-xl font-semibold text-muted-foreground w-6">{idx+1}</div>
                     <div
                       className="w-10 h-10 rounded-xl flex items-center justify-center"
-                      style={{ backgroundColor: `hsl(var(--traffic-${i.severity}) / 0.15)`, color: `hsl(var(--traffic-${i.severity}))` }}
+                      style={{ backgroundColor: trafficColorVar(i.severity, 0.15), color: trafficColorVar(i.severity) }}
                     >
                       <Icon className="w-5 h-5" />
                     </div>

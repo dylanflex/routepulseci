@@ -1,24 +1,16 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { INCIDENT_TYPES, ROAD_NETWORK, INCIDENTS, TRAFFIC_LEVELS } from "@/lib/mockData";
-import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat } from "lucide-react";
+import { INCIDENT_TYPES, ROAD_NETWORK, TRAFFIC_LEVELS } from "@/lib/mockData";
+import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { useAppData } from "@/context/AppDataContext";
 
-const iconMap = { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat };
-
-const colorFor = (level) => {
-  switch (level) {
-    case "fluid": return "hsl(var(--traffic-fluid))";
-    case "dense": return "hsl(var(--traffic-dense))";
-    case "blocked": return "hsl(var(--traffic-blocked))";
-    case "danger": return "hsl(var(--traffic-danger))";
-    default: return "hsl(var(--muted-foreground))";
-  }
-};
+const colorFor = (level) => (level in TRAFFIC_LEVELS ? trafficColorVar(level) : "hsl(var(--muted-foreground))");
 
 export const TrafficMap = ({ onPickIncident, activeFilter = "all", showRoute = false }) => {
   const [hovered, setHovered] = useState(null);
+  const { incidents } = useAppData();
 
-  const visibleIncidents = INCIDENTS.filter(
+  const visibleIncidents = incidents.filter(
     (i) => activeFilter === "all" || i.type === activeFilter
   );
 
@@ -104,7 +96,7 @@ export const TrafficMap = ({ onPickIncident, activeFilter = "all", showRoute = f
       {/* Incident pins */}
       {visibleIncidents.map((incident, idx) => {
         const meta = INCIDENT_TYPES[incident.type];
-        const Icon = iconMap[meta.icon] || AlertTriangle;
+        const Icon = getIncidentIcon(meta.icon);
         const leftPct = (incident.x / 800) * 100;
         const topPct = (incident.y / 600) * 100;
         const isConfirmed = incident.confirmed >= 5;

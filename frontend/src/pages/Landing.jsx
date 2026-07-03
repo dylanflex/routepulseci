@@ -8,7 +8,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { TrafficMap, TrafficLegend } from "@/components/routepulse/TrafficMap";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 import { StatChip } from "@/components/routepulse/StatChip";
-import { POSTS, STATS } from "@/lib/mockData";
+import { STATS } from "@/lib/mockData";
+import { useAppData } from "@/context/AppDataContext";
 import {
   ArrowRight, Zap, ShieldCheck, Users, MapPin, Sparkles, TrendingUp, Clock,
   MessageCircleHeart, Layers, LineChart, Menu, X, Bell, Heart,
@@ -318,7 +319,9 @@ const LiveMapSection = () => (
   </section>
 );
 
-const CommunitySection = () => (
+const CommunitySection = () => {
+  const { posts } = useAppData();
+  return (
   <section id="communaute" className="py-20 sm:py-28">
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div className="grid lg:grid-cols-12 gap-10">
@@ -340,14 +343,15 @@ const CommunitySection = () => (
         </div>
 
         <div className="lg:col-span-7 space-y-4">
-          {POSTS.slice(0, 2).map((post) => (
+          {posts.slice(0, 2).map((post) => (
             <AlertPost key={post.id} post={post} compact />
           ))}
         </div>
       </div>
     </div>
   </section>
-);
+  );
+};
 
 const ForWho = () => {
   const personas = [

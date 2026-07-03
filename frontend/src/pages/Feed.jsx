@@ -1,11 +1,12 @@
 import React, { useState } from "react";
-import { POSTS } from "@/lib/mockData";
+import { useAppData } from "@/context/AppDataContext";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flame, Clock, MapPin } from "lucide-react";
 
 export default function Feed() {
   const [tab, setTab] = useState("hot");
+  const { posts } = useAppData();
 
   return (
     <div className="px-4 pt-4">
@@ -29,7 +30,7 @@ export default function Feed() {
       </Tabs>
 
       <div className="mt-4 space-y-3">
-        {POSTS.map((p) => (
+        {posts.map((p) => (
           <AlertPost key={p.id} post={p} />
         ))}
       </div>

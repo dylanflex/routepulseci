@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useParams } from "react-router-dom";
-import { POSTS, COMMENTS, INCIDENT_TYPES } from "@/lib/mockData";
+import { useAppData } from "@/context/AppDataContext";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,18 +10,15 @@ import { toast } from "sonner";
 
 export default function PostDetail() {
   const { id } = useParams();
-  const post = POSTS.find((p) => p.id === id) || POSTS[0];
-  const initialComments = COMMENTS[post.id] || COMMENTS.p1;
-  const [comments, setComments] = useState(initialComments);
+  const { posts, commentsByPost, addComment } = useAppData();
+  const post = posts.find((p) => p.id === id) || posts[0];
+  const comments = commentsByPost[post.id] || [];
   const [text, setText] = useState("");
 
   const submit = (e) => {
     e.preventDefault();
     if (!text.trim()) return;
-    setComments([
-      ...comments,
-      { id: `c-${Date.now()}`, author: "Vous", avatar: "VS", time: "à l'instant", text, likes: 0 },
-    ]);
+    addComment(post.id, { id: `c-${Date.now()}`, author: "Vous", avatar: "VS", time: "à l'instant", text, likes: 0 });
     setText("");
     toast.success("Commentaire publié");
   };
