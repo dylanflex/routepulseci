@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { TrafficMap, TrafficLegend } from "@/components/routepulse/TrafficMap";
 import { INCIDENT_TYPES } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +23,7 @@ const FILTERS = [
 export default function MapView() {
   const [filter, setFilter] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
-  const { incidents, confirmIncident } = useAppData();
+  const { incidents, confirmIncident, loading } = useAppData();
   const selected = incidents.find((i) => i.id === selectedId) || null;
 
   return (
@@ -72,6 +73,7 @@ export default function MapView() {
           <span className="text-xs text-muted-foreground">{incidents.length} résultats</span>
         </div>
         <div className="mt-3 space-y-2">
+          {loading && <p className="text-sm text-muted-foreground text-center py-8">Chargement…</p>}
           {incidents.filter((i) => filter === "all" || i.type === filter).map((i) => {
             const meta = INCIDENT_TYPES[i.type];
             const Icon = getIncidentIcon(meta.icon);
@@ -90,7 +92,7 @@ export default function MapView() {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm text-foreground truncate">{meta.label} · {i.road}</p>
                   <p className="text-xs text-muted-foreground flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{i.time}</span>
+                    <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{formatRelativeTime(i.created_at)}</span>
                     <span>·</span>
                     <span className="inline-flex items-center gap-1"><Users className="w-3 h-3" />{i.confirmed} confirm.</span>
                   </p>
@@ -120,7 +122,7 @@ export default function MapView() {
                     <div>
                       <SheetTitle className="font-display text-xl">{meta.label}</SheetTitle>
                       <SheetDescription className="flex items-center gap-1.5 mt-0.5">
-                        <MapPin className="w-3.5 h-3.5" /> {selected.road} · {selected.time}
+                        <MapPin className="w-3.5 h-3.5" /> {selected.road} · {formatRelativeTime(selected.created_at)}
                       </SheetDescription>
                     </div>
                   </div>

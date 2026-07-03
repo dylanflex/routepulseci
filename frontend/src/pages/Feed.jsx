@@ -6,7 +6,7 @@ import { Flame, Clock, MapPin } from "lucide-react";
 
 export default function Feed() {
   const [tab, setTab] = useState("hot");
-  const { posts } = useAppData();
+  const { posts, loading } = useAppData();
 
   return (
     <div className="px-4 pt-4">
@@ -30,6 +30,7 @@ export default function Feed() {
       </Tabs>
 
       <div className="mt-4 space-y-3">
+        {loading && <p className="text-sm text-muted-foreground text-center py-8">Chargement…</p>}
         {posts.map((p) => (
           <AlertPost key={p.id} post={p} />
         ))}

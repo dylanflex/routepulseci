@@ -1,14 +1,43 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatChip } from "@/components/routepulse/StatChip";
-import { Flame, Award, MapPin, Bell, Settings, Shield, ChevronRight, Zap, ShieldCheck, Heart } from "lucide-react";
+import { MapPin, Bell, Settings, Shield, ChevronRight, ShieldCheck, LogOut } from "lucide-react";
 import { useAppData } from "@/context/AppDataContext";
+import { useAuth } from "@/context/AuthContext";
+import { formatMonthYear } from "@/lib/time";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 
 export default function Profile() {
   const { posts } = useAppData();
+  const { user, logout } = useAuth();
+
+  if (!user) {
+    return (
+      <div className="px-4 pt-16 flex flex-col items-center text-center">
+        <Avatar className="h-16 w-16">
+          <AvatarFallback className="bg-muted text-muted-foreground">?</AvatarFallback>
+        </Avatar>
+        <h1 className="mt-4 font-display text-xl font-semibold">Pas encore connecté</h1>
+        <p className="mt-1 text-sm text-muted-foreground max-w-xs">
+          Crée un profil pour accéder à tes signalements, tes confirmations et ton fil social.
+        </p>
+        <div className="mt-6 flex gap-2">
+          <Link to="/login" state={{ from: "/app/profil" }}>
+            <Button variant="outline" className="rounded-xl">Se connecter</Button>
+          </Link>
+          <Link to="/register">
+            <Button className="rounded-xl bg-gradient-hero text-primary-foreground shadow-glow">Créer un profil</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const myPosts = posts.filter((p) => p.author.handle === `@${user.username}`);
+  const confirmationsReceived = myPosts.reduce((sum, p) => sum + p.confirmed, 0);
+
   return (
     <div className="pt-4 pb-20">
       <div className="px-4">
@@ -17,34 +46,27 @@ export default function Profile() {
           <div className="absolute -top-16 -right-10 w-48 h-48 bg-primary/40 rounded-full blur-3xl" />
           <div className="relative flex items-center gap-4">
             <Avatar className="h-16 w-16 ring-2 ring-white/20">
-              <AvatarFallback className="bg-gradient-hero text-primary-foreground font-semibold text-xl">AK</AvatarFallback>
+              <AvatarFallback className="bg-gradient-hero text-primary-foreground font-semibold text-xl">{user.avatar}</AvatarFallback>
             </Avatar>
             <div className="flex-1">
-              <h1 className="font-display text-xl font-semibold">Aya Kouassi</h1>
-              <p className="text-xs text-white/70 flex items-center gap-1"><MapPin className="w-3 h-3" /> Cocody · Membre depuis Mars 2025</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <Badge className="bg-primary/25 text-primary-foreground border-0 hover:bg-primary/30">
-                  <Flame className="w-3 h-3 mr-1" /> Contributeur Or
-                </Badge>
-                <Badge className="bg-white/10 text-white border-0 hover:bg-white/15">
-                  <Shield className="w-3 h-3 mr-1" /> Voisin vigilant
-                </Badge>
-              </div>
+              <h1 className="font-display text-xl font-semibold">{user.display_name}</h1>
+              <p className="text-xs text-white/70 flex items-center gap-1">
+                <MapPin className="w-3 h-3" /> @{user.username} · Membre depuis {formatMonthYear(user.created_at)}
+              </p>
             </div>
+            <Button variant="ghost" size="icon" onClick={logout} className="text-white/70 hover:text-white hover:bg-white/10" aria-label="Se déconnecter">
+              <LogOut className="w-4 h-4" />
+            </Button>
           </div>
 
           <div className="relative mt-4 flex gap-2 text-sm">
             <div className="flex-1 text-center">
-              <p className="font-display text-xl font-semibold">348</p>
+              <p className="font-display text-xl font-semibold">{myPosts.length}</p>
               <p className="text-[11px] text-white/60">signalements</p>
             </div>
             <div className="flex-1 text-center border-x border-white/10">
-              <p className="font-display text-xl font-semibold">2 190</p>
-              <p className="text-[11px] text-white/60">confirmés</p>
-            </div>
-            <div className="flex-1 text-center">
-              <p className="font-display text-xl font-semibold">Rang #47</p>
-              <p className="text-[11px] text-white/60">Abidjan</p>
+              <p className="font-display text-xl font-semibold">{confirmationsReceived}</p>
+              <p className="text-[11px] text-white/60">confirmations reçues</p>
             </div>
           </div>
         </div>
@@ -52,30 +74,8 @@ export default function Profile() {
 
       {/* Stats */}
       <div className="px-4 mt-4 grid grid-cols-2 gap-2">
-        <StatChip label="Points" value="5 240" icon={Zap} tone="primary" hint="+120 cette semaine" />
-        <StatChip label="Impact" value="3h27" icon={Heart} tone="accent" hint="temps sauvé" />
-        <StatChip label="Fiabilité" value="96%" icon={ShieldCheck} tone="accent" hint="confirmations" />
-        <StatChip label="Badges" value="12" icon={Award} tone="primary" hint="3 en attente" />
-      </div>
-
-      {/* Achievements */}
-      <div className="px-4 mt-6">
-        <h2 className="font-display text-lg font-semibold">Tes badges</h2>
-        <div className="mt-3 flex gap-2 overflow-x-auto scrollbar-thin -mx-4 px-4 pb-2">
-          {[
-            { name: "1er signalement", emoji: "🎉", earned: true },
-            { name: "10 confirmations", emoji: "✅", earned: true },
-            { name: "Photographe", emoji: "📸", earned: true },
-            { name: "Nuit blanche", emoji: "🌙", earned: true },
-            { name: "Ambassadeur", emoji: "🚀", earned: false },
-            { name: "Top 10 Abj", emoji: "🏆", earned: false },
-          ].map((b) => (
-            <div key={b.name} className={`flex-shrink-0 w-24 p-3 rounded-2xl border text-center ${b.earned ? "bg-card border-border" : "bg-muted/50 border-transparent opacity-50"}`}>
-              <div className="text-3xl">{b.emoji}</div>
-              <p className="mt-1 text-[11px] font-medium text-foreground">{b.name}</p>
-            </div>
-          ))}
-        </div>
+        <StatChip label="Signalements" value={myPosts.length} icon={ShieldCheck} tone="primary" />
+        <StatChip label="Confirmations" value={confirmationsReceived} icon={ShieldCheck} tone="accent" />
       </div>
 
       {/* Settings list */}
@@ -103,12 +103,16 @@ export default function Profile() {
       </div>
 
       {/* Recent posts */}
-      <div className="px-4 mt-6">
-        <h2 className="font-display text-lg font-semibold">Tes derniers signalements</h2>
-        <div className="mt-3 space-y-3">
-          <AlertPost post={posts[0]} />
+      {myPosts.length > 0 && (
+        <div className="px-4 mt-6">
+          <h2 className="font-display text-lg font-semibold">Tes derniers signalements</h2>
+          <div className="mt-3 space-y-3">
+            {myPosts.slice(0, 3).map((p) => (
+              <AlertPost key={p.id} post={p} />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

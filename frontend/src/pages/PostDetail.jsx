@@ -1,24 +1,34 @@
-import React, { useState } from "react";
-import { useParams } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useParams, Link } from "react-router-dom";
 import { useAppData } from "@/context/AppDataContext";
+import { useAuth } from "@/context/AuthContext";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { formatRelativeTime } from "@/lib/time";
 import { Heart, Send } from "lucide-react";
 import { toast } from "sonner";
 
 export default function PostDetail() {
   const { id } = useParams();
-  const { posts, commentsByPost, addComment } = useAppData();
+  const { posts, commentsByPost, addComment, fetchComments } = useAppData();
+  const { user } = useAuth();
   const post = posts.find((p) => p.id === id) || posts[0];
-  const comments = commentsByPost[post.id] || [];
+  const comments = post ? commentsByPost[post.id] || [] : [];
   const [text, setText] = useState("");
+
+  useEffect(() => {
+    if (post) fetchComments(post.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post?.id]);
+
+  if (!post) return null;
 
   const submit = (e) => {
     e.preventDefault();
     if (!text.trim()) return;
-    addComment(post.id, { id: `c-${Date.now()}`, author: "Vous", avatar: "VS", time: "à l'instant", text, likes: 0 });
+    addComment(post.id, text);
     setText("");
     toast.success("Commentaire publié");
   };
@@ -39,7 +49,7 @@ export default function PostDetail() {
                 <div className="bg-muted/60 rounded-2xl px-3.5 py-2.5">
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="font-semibold text-sm text-foreground">{c.author}</span>
-                    <span className="text-[10px] text-muted-foreground">{c.time}</span>
+                    <span className="text-[10px] text-muted-foreground">{formatRelativeTime(c.created_at)}</span>
                   </div>
                   <p className="text-sm text-foreground leading-relaxed">{c.text}</p>
                 </div>
@@ -56,22 +66,33 @@ export default function PostDetail() {
       </div>
 
       {/* Composer */}
-      <form onSubmit={submit} className="fixed bottom-24 inset-x-0 mx-auto max-w-2xl px-4">
-        <div className="glass rounded-2xl p-2 flex items-center gap-2 shadow-elevated">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback className="bg-gradient-hero text-primary-foreground text-xs font-semibold">VS</AvatarFallback>
-          </Avatar>
-          <Input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Ajoute un commentaire..."
-            className="border-0 bg-transparent focus-visible:ring-0 flex-1 text-sm"
-          />
-          <Button type="submit" size="icon" className="h-9 w-9 rounded-xl bg-primary" disabled={!text.trim()}>
-            <Send className="w-4 h-4" />
-          </Button>
+      {user ? (
+        <form onSubmit={submit} className="fixed bottom-24 inset-x-0 mx-auto max-w-2xl px-4">
+          <div className="glass rounded-2xl p-2 flex items-center gap-2 shadow-elevated">
+            <Avatar className="h-8 w-8">
+              <AvatarFallback className="bg-gradient-hero text-primary-foreground text-xs font-semibold">{user.avatar}</AvatarFallback>
+            </Avatar>
+            <Input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Ajoute un commentaire..."
+              className="border-0 bg-transparent focus-visible:ring-0 flex-1 text-sm"
+            />
+            <Button type="submit" size="icon" className="h-9 w-9 rounded-xl bg-primary" disabled={!text.trim()}>
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <div className="fixed bottom-24 inset-x-0 mx-auto max-w-2xl px-4">
+          <div className="glass rounded-2xl p-3 shadow-elevated text-center text-sm text-muted-foreground">
+            <Link to="/login" state={{ from: `/app/feed/${post.id}` }} className="font-semibold text-primary">
+              Connecte-toi
+            </Link>{" "}
+            pour commenter
+          </div>
         </div>
-      </form>
+      )}
     </div>
   );
 }

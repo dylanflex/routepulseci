@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { INCIDENT_TYPES } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
 import { MapPin, ArrowRight, Clock, TrendingDown, AlertTriangle, Search, Route as RouteIcon } from "lucide-react";
 
@@ -45,7 +46,7 @@ export default function Trajet() {
         <>
           <div className="mt-4 rounded-2xl overflow-hidden border border-border bg-card">
             <div className="aspect-[4/3]">
-              <TrafficMap showRoute />
+              <TrafficMap />
             </div>
           </div>
 
@@ -83,7 +84,7 @@ export default function Trajet() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm text-foreground truncate">{meta.label} — {i.road}</p>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Clock className="w-3 h-3" />{i.time}</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Clock className="w-3 h-3" />{formatRelativeTime(i.created_at)}</p>
                     </div>
                     <span className="text-xs font-semibold text-destructive flex items-center gap-1">
                       <TrendingDown className="w-3 h-3" /> +{6+idx*3} min

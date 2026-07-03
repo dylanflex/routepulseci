@@ -6,6 +6,12 @@
       "runtimeExecutable": "yarn",
       "runtimeArgs": ["--cwd", "frontend", "start"],
       "port": 3000
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "server:app", "--app-dir", "backend", "--port", "8000"],
+      "port": 8000
     }
   ]
 }

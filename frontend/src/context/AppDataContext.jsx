@@ -1,55 +1,69 @@
-import { createContext, useContext, useCallback, useState } from "react";
-import { POSTS as INITIAL_POSTS, INCIDENTS as INITIAL_INCIDENTS, COMMENTS as INITIAL_COMMENTS } from "@/lib/mockData";
+import { createContext, useContext, useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { getCurrentPosition } from "@/lib/geo";
 
 const AppDataContext = createContext(null);
 
 export function AppDataProvider({ children }) {
-  const [posts, setPosts] = useState(INITIAL_POSTS);
-  const [incidents, setIncidents] = useState(INITIAL_INCIDENTS);
-  const [commentsByPost, setCommentsByPost] = useState(INITIAL_COMMENTS);
+  const [posts, setPosts] = useState([]);
+  const [incidents, setIncidents] = useState([]);
+  const [commentsByPost, setCommentsByPost] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const likePost = useCallback((postId, delta) => {
-    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, likes: p.likes + delta } : p)));
+  useEffect(() => {
+    Promise.all([api.listIncidents(), api.listPosts()])
+      .then(([incidentsData, postsData]) => {
+        setIncidents(incidentsData);
+        setPosts(postsData);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
   }, []);
 
-  const confirmPost = useCallback((postId) => {
-    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, confirmed: p.confirmed + 1 } : p)));
+  const likePost = useCallback(async (postId, delta) => {
+    const updated = await api.likePost(postId, delta);
+    setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
   }, []);
 
-  const confirmIncident = useCallback((incidentId) => {
-    setIncidents((prev) => prev.map((i) => (i.id === incidentId ? { ...i, confirmed: i.confirmed + 1 } : i)));
+  const confirmPost = useCallback(async (postId) => {
+    const updated = await api.confirmPost(postId);
+    setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
   }, []);
 
-  const addComment = useCallback((postId, comment) => {
+  const confirmIncident = useCallback(async (incidentId) => {
+    const updated = await api.confirmIncident(incidentId);
+    setIncidents((prev) => prev.map((i) => (i.id === incidentId ? updated : i)));
+  }, []);
+
+  const fetchComments = useCallback(async (postId) => {
+    const comments = await api.listComments(postId);
+    setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
+    return comments;
+  }, []);
+
+  const addComment = useCallback(async (postId, text) => {
+    const comment = await api.createComment(postId, { text });
     setCommentsByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
     setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, comments: p.comments + 1 } : p)));
   }, []);
 
-  const submitReport = useCallback(({ type, severity, note, postToFeed }) => {
-    const stamp = Date.now();
-    setIncidents((prev) => [
-      { id: `i-${stamp}`, type, x: 400, y: 300, road: "Position actuelle", severity, confirmed: 1, time: "à l'instant" },
-      ...prev,
-    ]);
+  const submitReport = useCallback(async ({ type, severity, note, postToFeed }) => {
+    const { lat, lng } = await getCurrentPosition();
+    const incident = await api.createIncident({ type, lat, lng, road: "Position actuelle", severity });
+    setIncidents((prev) => [incident, ...prev]);
 
     if (postToFeed) {
-      setPosts((prev) => [
-        {
-          id: `p-${stamp}`,
-          author: { name: "Vous", handle: "@vous", avatar: "VS", verified: false, badge: "Contributeur" },
-          time: "à l'instant",
-          location: "Votre position",
-          type,
-          severity,
-          text: note || "Nouvelle alerte signalée.",
-          image: null,
-          likes: 0,
-          comments: 0,
-          shares: 0,
-          confirmed: 1,
-        },
-        ...prev,
-      ]);
+      const post = await api.createPost({
+        location: "Votre position",
+        type,
+        severity,
+        text: note || "Nouvelle alerte signalée.",
+      });
+      setPosts((prev) => [post, ...prev]);
     }
   }, []);
 
@@ -57,11 +71,14 @@ export function AppDataProvider({ children }) {
     posts,
     incidents,
     commentsByPost,
+    loading,
+    error,
     likePost,
     confirmPost,
     confirmIncident,
     addComment,
     submitReport,
+    fetchComments,
   };
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;

@@ -301,7 +301,7 @@ const LiveMapSection = () => (
         <div className="lg:col-span-7">
           <div className="relative rounded-3xl border border-border bg-card shadow-elevated p-3 overflow-hidden">
             <div className="aspect-[4/3] w-full rounded-2xl overflow-hidden">
-              <TrafficMap showRoute />
+              <TrafficMap />
             </div>
             <div className="absolute top-6 left-6 glass rounded-xl px-3 py-2 shadow-soft">
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Abidjan · Live</p>

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Heart, MessageCircle, Share2, Flag, ShieldCheck, MapPin, MoreHorizontal, Bookmark } from "lucide-react";
 import { INCIDENT_TYPES, TRAFFIC_LEVELS } from "@/lib/mockData";
 import { trafficColorVar } from "@/lib/traffic";
+import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,7 +64,7 @@ export const AlertPost = ({ post, compact = false }) => {
             <MapPin className="w-3 h-3" />
             <span className="truncate">{post.location}</span>
             <span>·</span>
-            <span>{post.time}</span>
+            <span>{formatRelativeTime(post.created_at)}</span>
           </div>
         </div>
         <button className="p-1.5 rounded-full hover:bg-muted transition-colors" aria-label="Plus">

@@ -112,6 +112,18 @@ let webpackConfig = {
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
+
+      // Parallel Terser minification spawns worker processes that have been
+      // observed to crash with an access violation on memory-constrained
+      // Windows hosts once larger deps (e.g. maplibre-gl) are bundled in.
+      if (webpackConfig.optimization?.minimizer) {
+        webpackConfig.optimization.minimizer.forEach((minimizer) => {
+          if (minimizer.options && "parallel" in minimizer.options) {
+            minimizer.options.parallel = false;
+          }
+        });
+      }
+
       return webpackConfig;
     },
   },
