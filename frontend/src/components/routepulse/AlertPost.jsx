@@ -12,16 +12,22 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
 export const AlertPost = ({ post, compact = false }) => {
-  const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(false);
   const navigate = useNavigate();
   const { likePost, confirmPost } = useAppData();
-  const meta = INCIDENT_TYPES[post.type];
-  const severity = TRAFFIC_LEVELS[post.severity];
+  // Server is the source of truth for the current user's vote state (§3.3),
+  // so the same post stays consistent across the feed, detail and profile.
+  const liked = post.liked_by_me;
+  const confirmedByMe = post.confirmed_by_me;
+  const meta = INCIDENT_TYPES[post.type] || { label: post.type, icon: "AlertTriangle", emoji: "⚠️" };
+  const severity = TRAFFIC_LEVELS[post.severity] || { label: post.severity, hex: "#94a3b8" };
 
-  const handleLike = () => {
-    likePost(post.id, liked ? -1 : 1);
-    setLiked(!liked);
+  const handleLike = async () => {
+    try {
+      await likePost(post.id);
+    } catch (err) {
+      toast.error(err.message || "Action impossible", { description: "Connecte-toi pour réagir." });
+    }
   };
 
   const handleShare = () => {
@@ -32,9 +38,15 @@ export const AlertPost = ({ post, compact = false }) => {
     toast("Signalement envoyé", { description: "Un modérateur va vérifier ce contenu." });
   };
 
-  const handleConfirm = () => {
-    confirmPost(post.id);
-    toast.success("Alerte confirmée ✅", { description: "Merci, tu aides à fiabiliser l'info." });
+  const handleConfirm = async () => {
+    try {
+      await confirmPost(post.id);
+      if (!confirmedByMe) {
+        toast.success("Alerte confirmée ✅", { description: "Merci, tu aides à fiabiliser l'info." });
+      }
+    } catch (err) {
+      toast.error(err.message || "Confirmation impossible", { description: "Connecte-toi pour confirmer." });
+    }
   };
 
   return (
@@ -114,9 +126,9 @@ export const AlertPost = ({ post, compact = false }) => {
           <Share2 className="w-4 h-4" />
           <span className="text-xs font-medium">{post.shares}</span>
         </Button>
-        <Button variant="ghost" size="sm" onClick={handleConfirm} className="flex-1 gap-1.5 rounded-xl text-accent hover:text-accent hover:bg-accent/10">
-          <ShieldCheck className="w-4 h-4" />
-          <span className="text-xs font-medium hidden sm:inline">Confirmer</span>
+        <Button variant="ghost" size="sm" onClick={handleConfirm} className={`flex-1 gap-1.5 rounded-xl hover:text-accent hover:bg-accent/10 ${confirmedByMe ? "text-accent" : "text-muted-foreground"}`}>
+          <ShieldCheck className={`w-4 h-4 ${confirmedByMe ? "fill-accent/20" : ""}`} />
+          <span className="text-xs font-medium hidden sm:inline">{confirmedByMe ? "Confirmé" : "Confirmer"}</span>
         </Button>
         <div className="flex">
           <Button variant="ghost" size="icon" onClick={() => setSaved(!saved)} className="h-9 w-9 rounded-xl text-muted-foreground">

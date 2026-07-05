@@ -22,6 +22,7 @@ beforeEach(() => {
   comments = {};
 
   api.listIncidents.mockImplementation(() => Promise.resolve(incidents));
+  api.roadConditions.mockResolvedValue([]);
   api.createIncident.mockImplementation((body) => {
     const incident = { id: `i-${incidents.length + 1}`, confirmed: 1, created_at: new Date().toISOString(), ...body };
     incidents = [incident, ...incidents];
@@ -50,8 +51,10 @@ beforeEach(() => {
     posts = [post, ...posts];
     return Promise.resolve(post);
   });
-  api.likePost.mockImplementation((id, delta) => {
-    posts = posts.map((p) => (p.id === id ? { ...p, likes: p.likes + delta } : p));
+  // The API is now a server-side toggle (no client delta): a like adds one and
+  // marks the post as liked_by_me for the current user.
+  api.likePost.mockImplementation((id) => {
+    posts = posts.map((p) => (p.id === id ? { ...p, likes: p.likes + 1, liked_by_me: true } : p));
     return Promise.resolve(posts.find((p) => p.id === id));
   });
   api.confirmPost.mockImplementation((id) => {
@@ -90,7 +93,9 @@ test("submitReport adds a new incident and a matching feed post", async () => {
     await result.current.submitReport({ type: "jam", severity: "dense", note: "Test embouteillage", postToFeed: true });
   });
 
-  expect(result.current.incidents.length).toBe(incidentsBefore + 1);
+  // react-query notifies observers on the next tick, so let the cache-driven
+  // state settle before asserting.
+  await waitFor(() => expect(result.current.incidents.length).toBe(incidentsBefore + 1));
   expect(result.current.posts.length).toBe(postsBefore + 1);
   expect(result.current.posts[0].text).toBe("Test embouteillage");
 });
@@ -111,10 +116,10 @@ test("likePost updates only the targeted post", async () => {
   const [post, other] = result.current.posts;
 
   await act(async () => {
-    await result.current.likePost(post.id, 1);
+    await result.current.likePost(post.id);
   });
 
-  expect(result.current.posts.find((p) => p.id === post.id).likes).toBe(post.likes + 1);
+  await waitFor(() => expect(result.current.posts.find((p) => p.id === post.id).likes).toBe(post.likes + 1));
   expect(result.current.posts.find((p) => p.id === other.id).likes).toBe(other.likes);
 });
 

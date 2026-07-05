@@ -1,43 +1,108 @@
-import { createContext, useContext, useCallback, useEffect, useState } from "react";
+import { createContext, useContext, useCallback, useState } from "react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { getCurrentPosition } from "@/lib/geo";
 
 const AppDataContext = createContext(null);
 
+// The provider owns its own QueryClient (one per mount) so the whole app shares
+// a single cache, while each test render stays isolated. This is why index.js
+// no longer needs a QueryClientProvider of its own.
+function makeQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { staleTime: 60_000, refetchOnWindowFocus: false, retry: 1 },
+      mutations: { retry: 0 },
+    },
+  });
+}
+
 export function AppDataProvider({ children }) {
-  const [posts, setPosts] = useState([]);
-  const [incidents, setIncidents] = useState([]);
+  const [queryClient] = useState(makeQueryClient);
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppData>{children}</AppData>
+    </QueryClientProvider>
+  );
+}
+
+function AppData({ children }) {
+  const qc = useQueryClient();
   const [commentsByPost, setCommentsByPost] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    Promise.all([api.listIncidents(), api.listPosts()])
-      .then(([incidentsData, postsData]) => {
-        setIncidents(incidentsData);
-        setPosts(postsData);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, []);
+  const incidentsQuery = useQuery({
+    queryKey: ["incidents"],
+    queryFn: api.listIncidents,
+    // "Carte en direct" should live up to its name: poll for new citizen
+    // reports and refresh when the user returns to the tab.
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const postsQuery = useQuery({ queryKey: ["posts"], queryFn: api.listPosts });
+  // Real road-condition segments (coloured by nearby incidents), polled with the map.
+  const roadConditionsQuery = useQuery({
+    queryKey: ["road-conditions"],
+    queryFn: api.roadConditions,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
 
-  const likePost = useCallback(async (postId, delta) => {
-    const updated = await api.likePost(postId, delta);
-    setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
-  }, []);
+  const patchPost = useCallback(
+    (updated) => qc.setQueryData(["posts"], (prev = []) => prev.map((p) => (p.id === updated.id ? updated : p))),
+    [qc],
+  );
+  const patchIncident = useCallback(
+    (updated) => qc.setQueryData(["incidents"], (prev = []) => prev.map((i) => (i.id === updated.id ? updated : i))),
+    [qc],
+  );
 
-  const confirmPost = useCallback(async (postId) => {
-    const updated = await api.confirmPost(postId);
-    setPosts((prev) => prev.map((p) => (p.id === postId ? updated : p)));
-  }, []);
+  const likeMutation = useMutation({ mutationFn: (postId) => api.likePost(postId), onSuccess: patchPost });
+  const confirmPostMutation = useMutation({ mutationFn: (postId) => api.confirmPost(postId), onSuccess: patchPost });
+  const confirmIncidentMutation = useMutation({ mutationFn: (id) => api.confirmIncident(id), onSuccess: patchIncident });
 
-  const confirmIncident = useCallback(async (incidentId) => {
-    const updated = await api.confirmIncident(incidentId);
-    setIncidents((prev) => prev.map((i) => (i.id === incidentId ? updated : i)));
-  }, []);
+  const addCommentMutation = useMutation({
+    mutationFn: ({ postId, text }) => api.createComment(postId, { text }),
+    onSuccess: (comment, { postId }) => {
+      setCommentsByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
+      qc.setQueryData(["posts"], (prev = []) => prev.map((p) => (p.id === postId ? { ...p, comments: p.comments + 1 } : p)));
+    },
+  });
+
+  const submitReportMutation = useMutation({
+    mutationFn: async ({ type, severity, note, postToFeed, image }) => {
+      const { lat, lng } = await getCurrentPosition();
+      const incident = await api.createIncident({ type, lat, lng, road: "Position actuelle", severity });
+      let post = null;
+      if (postToFeed) {
+        post = await api.createPost({
+          location: "Votre position",
+          type,
+          severity,
+          text: note || "Nouvelle alerte signalée.",
+          image: image || null,
+        });
+      }
+      return { incident, post };
+    },
+    onSuccess: ({ incident, post }) => {
+      qc.setQueryData(["incidents"], (prev = []) => [incident, ...prev]);
+      if (post) qc.setQueryData(["posts"], (prev = []) => [post, ...prev]);
+    },
+  });
+
+  // Mutations expose promise-returning helpers so callers can await + catch and
+  // surface a toast on failure (no more silent unhandled rejections).
+  const likePost = useCallback((postId) => likeMutation.mutateAsync(postId), [likeMutation]);
+  const confirmPost = useCallback((postId) => confirmPostMutation.mutateAsync(postId), [confirmPostMutation]);
+  const confirmIncident = useCallback((id) => confirmIncidentMutation.mutateAsync(id), [confirmIncidentMutation]);
+  const addComment = useCallback((postId, text) => addCommentMutation.mutateAsync({ postId, text }), [addCommentMutation]);
+  const submitReport = useCallback((args) => submitReportMutation.mutateAsync(args), [submitReportMutation]);
 
   const fetchComments = useCallback(async (postId) => {
     const comments = await api.listComments(postId);
@@ -45,34 +110,16 @@ export function AppDataProvider({ children }) {
     return comments;
   }, []);
 
-  const addComment = useCallback(async (postId, text) => {
-    const comment = await api.createComment(postId, { text });
-    setCommentsByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
-    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, comments: p.comments + 1 } : p)));
-  }, []);
-
-  const submitReport = useCallback(async ({ type, severity, note, postToFeed }) => {
-    const { lat, lng } = await getCurrentPosition();
-    const incident = await api.createIncident({ type, lat, lng, road: "Position actuelle", severity });
-    setIncidents((prev) => [incident, ...prev]);
-
-    if (postToFeed) {
-      const post = await api.createPost({
-        location: "Votre position",
-        type,
-        severity,
-        text: note || "Nouvelle alerte signalée.",
-      });
-      setPosts((prev) => [post, ...prev]);
-    }
-  }, []);
-
   const value = {
-    posts,
-    incidents,
+    posts: postsQuery.data ?? [],
+    incidents: incidentsQuery.data ?? [],
+    roadConditions: roadConditionsQuery.data ?? [],
+    incidentsUpdatedAt: incidentsQuery.dataUpdatedAt,
+    incidentsFetching: incidentsQuery.isFetching,
+    refetchIncidents: incidentsQuery.refetch,
     commentsByPost,
-    loading,
-    error,
+    loading: incidentsQuery.isLoading || postsQuery.isLoading,
+    error: incidentsQuery.error?.message || postsQuery.error?.message || null,
     likePost,
     confirmPost,
     confirmIncident,

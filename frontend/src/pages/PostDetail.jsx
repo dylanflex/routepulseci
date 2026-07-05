@@ -25,12 +25,18 @@ export default function PostDetail() {
 
   if (!post) return null;
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
-    addComment(post.id, text);
+    const draft = text;
     setText("");
-    toast.success("Commentaire publié");
+    try {
+      await addComment(post.id, draft);
+      toast.success("Commentaire publié");
+    } catch (err) {
+      setText(draft); // restore so the user doesn't lose their comment
+      toast.error(err.message || "Publication impossible");
+    }
   };
 
   return (

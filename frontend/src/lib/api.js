@@ -27,14 +27,18 @@ export const api = {
   me: () => request("/auth/me"),
 
   listIncidents: () => request("/incidents"),
+  roadConditions: () => request("/road-conditions"),
   createIncident: (body) => request("/incidents", { method: "POST", body: JSON.stringify(body) }),
   confirmIncident: (id) => request(`/incidents/${id}/confirm`, { method: "POST" }),
 
   listPosts: () => request("/posts"),
   createPost: (body) => request("/posts", { method: "POST", body: JSON.stringify(body) }),
-  likePost: (id, delta) => request(`/posts/${id}/like`, { method: "POST", body: JSON.stringify({ delta }) }),
+  likePost: (id) => request(`/posts/${id}/like`, { method: "POST" }),
   confirmPost: (id) => request(`/posts/${id}/confirm`, { method: "POST" }),
 
   listComments: (postId) => request(`/posts/${postId}/comments`),
   createComment: (postId, body) => request(`/posts/${postId}/comments`, { method: "POST", body: JSON.stringify(body) }),
+
+  scanRoute: (body) => request("/route/scan", { method: "POST", body: JSON.stringify(body) }),
+  suggestPlaces: (q) => request(`/geocode/suggest?q=${encodeURIComponent(q)}`),
 };

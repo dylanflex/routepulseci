@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { TrafficMap, TrafficLegend } from "@/components/routepulse/TrafficMap";
 import { INCIDENT_TYPES } from "@/lib/mockData";
-import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { getIncidentIcon, trafficColorVar, estimateDelayMin } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
 import { Button } from "@/components/ui/button";
@@ -23,14 +23,33 @@ const FILTERS = [
 export default function MapView() {
   const [filter, setFilter] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
-  const { incidents, confirmIncident, loading } = useAppData();
+  const [recenterKey, setRecenterKey] = useState(0);
+  const { incidents, confirmIncident, loading, incidentsUpdatedAt, incidentsFetching, roadConditions } = useAppData();
   const selected = incidents.find((i) => i.id === selectedId) || null;
+
+  // "Mis à jour" reflects the last successful fetch — the map now polls, so
+  // this is a real freshness indicator, not a frozen string.
+  const lastUpdated = incidentsUpdatedAt ? new Date(incidentsUpdatedAt).toISOString() : null;
+
+  const handleConfirmSelected = async () => {
+    try {
+      await confirmIncident(selected.id);
+      toast.success("Confirmation envoyée 💪");
+    } catch (err) {
+      toast.error(err.message || "Confirmation impossible");
+    }
+  };
 
   return (
     <div className="px-4 pt-4">
       <div>
-        <h1 className="font-display text-2xl font-semibold text-foreground">Carte en direct</h1>
-        <p className="text-sm text-muted-foreground">Abidjan · mis à jour il y a 12 sec</p>
+        <h1 className="font-display text-2xl font-semibold text-foreground flex items-center gap-2">
+          Carte en direct
+          <span className={`inline-block w-2 h-2 rounded-full ${incidentsFetching ? "bg-accent animate-pulse" : "bg-accent/60"}`} title={incidentsFetching ? "Mise à jour…" : "En direct"} />
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Abidjan{lastUpdated ? ` · mis à jour ${formatRelativeTime(lastUpdated)}` : ""}
+        </p>
       </div>
 
       {/* Filters */}
@@ -55,12 +74,17 @@ export default function MapView() {
       {/* Map card */}
       <div className="mt-2 rounded-2xl overflow-hidden border border-border bg-card shadow-soft relative">
         <div className="aspect-[3/4] sm:aspect-[4/3]">
-          <TrafficMap activeFilter={filter} onPickIncident={(i) => setSelectedId(i.id)} />
+          <TrafficMap activeFilter={filter} onPickIncident={(i) => setSelectedId(i.id)} recenterKey={recenterKey} roadConditions={roadConditions} />
         </div>
         {/* Legend overlay */}
         <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
           <div className="glass rounded-xl p-2"><TrafficLegend /></div>
-          <Button size="icon" className="h-10 w-10 rounded-full bg-card text-foreground hover:bg-card shadow-elevated border border-border">
+          <Button
+            size="icon"
+            onClick={() => setRecenterKey((k) => k + 1)}
+            aria-label="Recentrer sur ma position"
+            className="h-10 w-10 rounded-full bg-card text-foreground hover:bg-card shadow-elevated border border-border"
+          >
             <Navigation className="w-4 h-4" />
           </Button>
         </div>
@@ -75,7 +99,7 @@ export default function MapView() {
         <div className="mt-3 space-y-2">
           {loading && <p className="text-sm text-muted-foreground text-center py-8">Chargement…</p>}
           {incidents.filter((i) => filter === "all" || i.type === filter).map((i) => {
-            const meta = INCIDENT_TYPES[i.type];
+            const meta = INCIDENT_TYPES[i.type] || { label: i.type, icon: "AlertTriangle", emoji: "⚠️" };
             const Icon = getIncidentIcon(meta.icon);
             return (
               <button
@@ -110,7 +134,7 @@ export default function MapView() {
       <Sheet open={!!selected} onOpenChange={(o) => !o && setSelectedId(null)}>
         <SheetContent side="bottom" className="rounded-t-3xl max-h-[80vh]">
           {selected && (() => {
-            const meta = INCIDENT_TYPES[selected.type];
+            const meta = INCIDENT_TYPES[selected.type] || { label: selected.type, icon: "AlertTriangle", emoji: "⚠️" };
             const Icon = getIncidentIcon(meta.icon);
             return (
               <>
@@ -138,14 +162,14 @@ export default function MapView() {
                   </div>
                   <div className="p-3 rounded-xl bg-muted/60">
                     <p className="text-xs text-muted-foreground">Impact</p>
-                    <p className="font-semibold text-sm text-foreground">+18 min</p>
+                    <p className="font-semibold text-sm text-foreground">+{estimateDelayMin(selected.type, selected.severity)} min</p>
                   </div>
                 </div>
                 <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
                   Les utilisateurs à proximité rapportent une {meta.label.toLowerCase()} confirmée. Une déviation par la voie parallèle est conseillée. Rejoins la discussion dans le fil.
                 </p>
                 <div className="mt-5 flex gap-2">
-                  <Button className="flex-1 rounded-xl bg-foreground text-background" onClick={() => { confirmIncident(selected.id); toast.success("Confirmation envoyée 💪"); }}>
+                  <Button className="flex-1 rounded-xl bg-foreground text-background" onClick={handleConfirmSelected}>
                     Confirmer
                   </Button>
                   <Button variant="outline" className="flex-1 rounded-xl" onClick={() => toast("Lien copié 🔗")}>

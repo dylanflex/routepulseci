@@ -25,6 +25,7 @@ jest.mock("@/lib/api", () => {
       login: jest.fn(),
       me: jest.fn(),
       listIncidents: jest.fn(),
+      roadConditions: jest.fn(),
       createIncident: jest.fn(),
       confirmIncident: jest.fn(),
       listPosts: jest.fn(),
@@ -33,6 +34,8 @@ jest.mock("@/lib/api", () => {
       confirmPost: jest.fn(),
       listComments: jest.fn(),
       createComment: jest.fn(),
+      scanRoute: jest.fn(),
+      suggestPlaces: jest.fn(),
     },
   };
 });
@@ -49,6 +52,7 @@ beforeEach(() => {
   const comments = { p1: [{ id: "c1", post_id: "p1", author: "Serge B.", avatar: "SB", text: "Confirmé.", likes: 12, created_at: now }] };
 
   api.listIncidents.mockResolvedValue(incidents);
+  api.roadConditions.mockResolvedValue([]);
   api.createIncident.mockResolvedValue(incidents[0]);
   api.confirmIncident.mockResolvedValue(incidents[0]);
   api.listPosts.mockResolvedValue(posts);
@@ -60,6 +64,8 @@ beforeEach(() => {
   api.me.mockResolvedValue(fakeUser);
   api.login.mockResolvedValue({ access_token: "t", user: fakeUser });
   api.register.mockResolvedValue({ access_token: "t", user: fakeUser });
+  api.suggestPlaces.mockResolvedValue([]);
+  api.scanRoute.mockResolvedValue({ from: {}, to: {}, distance_km: 1, duration_min: 1, route: [], alerts: [], severe_count: 0, reroute: null, recommendation: null });
 });
 
 const renderAt = (path, route) =>

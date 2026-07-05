@@ -101,3 +101,91 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Apply the RoutePulse code-review corrections brief: crash robustness, backend vote security, react-query adoption, dead-UI cleanup, and backend tests."
+
+backend:
+  - task: "Enum validation for incident/post type & severity (422 on bad values)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "IncidentType/Severity Pydantic enums on IncidentCreate & PostCreate. Covered by test_api.py::test_invalid_incident_type_is_422 and test_invalid_severity_is_422."
+  - task: "Authenticated, idempotent post like/confirm with anti-double-vote tables"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "PostLikeORM/PostConfirmORM (one row per user+post). like/confirm require auth, toggle, no client delta. PostOut exposes liked_by_me/confirmed_by_me. Incidents remain anonymous by product choice. Covered by like/confirm/per-user tests."
+  - task: "Backend API test suite"
+    implemented: true
+    working: true
+    file: "backend/test_api.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "15 endpoint tests via FastAPI TestClient on an isolated SQLite db. Full backend suite: 22 passed (routing + api). black/isort/flake8/mypy all clean."
+
+frontend:
+  - task: "Crash guards on unknown incident type/severity"
+    implemented: true
+    working: true
+    file: "frontend/src/components/routepulse/AlertPost.jsx, frontend/src/pages/MapView.jsx, frontend/src/components/routepulse/TrafficMap.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Every INCIDENT_TYPES[...] / TRAFFIC_LEVELS[...] lookup has a fallback default."
+  - task: "Adopt react-query + mutation error handling"
+    implemented: true
+    working: true
+    file: "frontend/src/context/AppDataContext.jsx, frontend/src/index.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "AppDataProvider owns a QueryClient (useQuery/useMutation); index.js no longer wraps a provider. All mutations await+try/catch in callers (Report, AlertPost, MapView, PostDetail) with error toasts. liked_by_me/confirmed_by_me are the source of truth. 18 frontend tests pass; prod build compiles."
+  - task: "Dead UI wired: feed tab sorting, header search + notifications, real timestamp/impact, photo upload"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/Feed.jsx, frontend/src/pages/AppShell.jsx, frontend/src/pages/MapView.jsx, frontend/src/pages/Report.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Feed tabs sort (hot/recent); un-implementable 'Autour' tab removed (posts have no coords). Search dialog + notifications popover backed by live data. MapView shows real relative timestamp and estimated delay. Report has a working image upload (data URL -> post image field)."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus: []
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Corrections brief applied. Automated checks green: backend 22 pytest + black/isort/flake8/mypy clean; frontend 18 jest tests + production build. Manual UI smoke (dev server) still recommended for the new search/notifications/photo flows."

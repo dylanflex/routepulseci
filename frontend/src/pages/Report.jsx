@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { INCIDENT_TYPES, TRAFFIC_LEVELS } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
-import { Camera, MapPin, Zap, Sparkles, Check } from "lucide-react";
+import { Camera, MapPin, Zap, Sparkles, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -17,17 +17,44 @@ export default function Report() {
   const [severity, setSeverity] = useState("dense");
   const [note, setNote] = useState("");
   const [postToFeed, setPostToFeed] = useState(true);
+  const [image, setImage] = useState(null);
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const fileInputRef = useRef(null);
   const navigate = useNavigate();
   const { submitReport } = useAppData();
   const { user } = useAuth();
   const canPostToFeed = postToFeed && !!user;
 
-  const submit = () => {
-    submitReport({ type, severity, note, postToFeed: canPostToFeed });
-    setSent(true);
-    toast.success("Alerte envoyée ⚡", { description: "Merci, ta ville te remercie !" });
-    setTimeout(() => navigate(canPostToFeed ? "/app/feed" : "/app/carte"), 1600);
+  const handlePhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Format non supporté", { description: "Choisis une image." });
+      return;
+    }
+    // ~2.5 MB cap keeps the data URL small enough for the JSON payload.
+    if (file.size > 2.5 * 1024 * 1024) {
+      toast.error("Image trop lourde", { description: "Choisis une photo de moins de 2,5 Mo." });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setImage(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const submit = async () => {
+    setSending(true);
+    try {
+      // Only feed posts carry an image (incidents have no image field).
+      await submitReport({ type, severity, note, postToFeed: canPostToFeed, image: canPostToFeed ? image : null });
+      setSent(true);
+      toast.success("Alerte envoyée ⚡", { description: "Merci, ta ville te remercie !" });
+      setTimeout(() => navigate(canPostToFeed ? "/app/feed" : "/app/carte"), 1600);
+    } catch (err) {
+      toast.error(err.message || "Envoi impossible, réessaie.");
+      setSending(false);
+    }
   };
 
   return (
@@ -138,15 +165,42 @@ export default function Report() {
               placeholder="Décris la situation en quelques mots..."
               className="mt-2 min-h-[110px] rounded-2xl border-border bg-card resize-none"
             />
-            <button className="mt-3 w-full p-4 rounded-2xl border border-dashed border-border bg-card flex items-center gap-3 text-left hover:border-primary transition-colors">
-              <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
-                <Camera className="w-5 h-5 text-muted-foreground" />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhoto}
+            />
+            {image ? (
+              <div className="mt-3 relative rounded-2xl overflow-hidden border border-border">
+                <img src={image} alt="Aperçu" className="w-full h-40 object-cover" />
+                <button
+                  type="button"
+                  onClick={() => { setImage(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center text-foreground hover:bg-background"
+                  aria-label="Retirer la photo"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <div>
-                <p className="font-semibold text-sm">Ajouter une photo</p>
-                <p className="text-[11px] text-muted-foreground">Aide la commu à confirmer plus vite</p>
-              </div>
-            </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-3 w-full p-4 rounded-2xl border border-dashed border-border bg-card flex items-center gap-3 text-left hover:border-primary transition-colors"
+              >
+                <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
+                  <Camera className="w-5 h-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm">Ajouter une photo</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {canPostToFeed ? "Aide la commu à confirmer plus vite" : "Connecte-toi et publie dans le fil pour joindre une photo"}
+                  </p>
+                </div>
+              </button>
+            )}
 
             <div className="mt-4 flex items-center justify-between p-4 rounded-2xl bg-card border border-border">
               <div>
@@ -163,9 +217,9 @@ export default function Report() {
             </div>
 
             <div className="mt-6 flex gap-2">
-              <Button variant="outline" onClick={() => setStep(2)} className="flex-1 h-12 rounded-xl">Retour</Button>
-              <Button onClick={submit} className="flex-1 h-12 rounded-xl bg-gradient-hero text-primary-foreground shadow-glow">
-                Envoyer l’alerte ⚡
+              <Button variant="outline" onClick={() => setStep(2)} disabled={sending} className="flex-1 h-12 rounded-xl">Retour</Button>
+              <Button onClick={submit} disabled={sending} className="flex-1 h-12 rounded-xl bg-gradient-hero text-primary-foreground shadow-glow disabled:opacity-60">
+                {sending ? "Envoi…" : "Envoyer l’alerte ⚡"}
               </Button>
             </div>
           </motion.div>
