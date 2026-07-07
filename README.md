@@ -29,6 +29,14 @@ yarn start
 ```
 Ouvre [http://localhost:3000](http://localhost:3000).
 
+Contrairement aux clés backend ci-dessous, la carte (Mapbox GL JS) n'a **pas** de repli hors-ligne : il faut un `frontend/.env` avec
+
+```
+REACT_APP_MAPBOX_TOKEN=pk.xxxxx
+```
+
+(jeton public `pk.*`, gratuit sur [mapbox.com](https://www.mapbox.com), sans danger à exposer côté client). Sans lui, la carte reste blanche.
+
 ### Backend
 
 ```bash
@@ -56,3 +64,41 @@ Les clés se placent dans un fichier `backend/.env` (chargé au démarrage). Ell
 
 - Backend : `cd backend && pytest` (couvre la géométrie et la corrélation incidents/itinéraire du mode « avant de partir »).
 - Frontend : `cd frontend && yarn test`.
+
+## Déploiement sur LWS (hébergement mutualisé)
+
+LWS mutualisé tourne sous cPanel + Apache/Passenger, qui ne parle que WSGI — pas nativement adapté à une API FastAPI (ASGI) ni à un serveur Node. Le backend passe donc par un petit pont, le frontend est déployé en fichiers statiques.
+
+### Backend (API Python via Passenger)
+
+1. Dépose le contenu de `backend/` (via Git, FTP ou le gestionnaire de fichiers cPanel) dans un dossier dédié, par exemple `routepulse-api`.
+2. Dans cPanel → **Setup Python App**, crée une application :
+   - **Version Python** : la plus récente proposée (3.11+).
+   - **Application root** : le dossier déposé à l'étape 1.
+   - **Application URL** : un sous-domaine dédié (ex. `api.tondomaine.com`) plutôt qu'un sous-dossier, pour ne pas entrer en conflit avec le routage du frontend.
+   - **Application startup file** : `passenger_wsgi.py` (fourni — adapte l'ASGI de FastAPI en WSGI via `a2wsgi`, et déclenche lui-même la création des tables + le seed puisque Passenger n'envoie jamais l'événement `lifespan`).
+   - **Application Entry point** : `application`.
+3. Depuis le terminal fourni par cPanel pour cette app (bouton *"Enter to the virtual environment"*) : `pip install -r requirements.txt`.
+4. Dans l'onglet *Environment variables* de la même interface, définis au minimum :
+   - `JWT_SECRET` → une vraie valeur aléatoire (**jamais** la valeur par défaut en production — sinon n'importe qui peut forger un token).
+   - `CORS_ORIGINS` → l'URL exacte du frontend déployé (ex. `https://tondomaine.com`).
+   - `GRAPHHOPPER_API_KEY` / `ANTHROPIC_API_KEY` → optionnelles, activent le routage réel et la recommandation IA au lieu des fallbacks hors-ligne.
+5. Redémarre l'application depuis cPanel après toute modification (code ou variables).
+
+`routepulse.db` (SQLite) se crée directement dans ce dossier — aucune base externe requise.
+
+### Frontend (build statique)
+
+1. En local, crée `frontend/.env.production` :
+   ```
+   REACT_APP_BACKEND_URL=https://api.tondomaine.com
+   REACT_APP_MAPBOX_TOKEN=pk.xxxxx
+   ```
+   CRA injecte ces valeurs **au moment du build**, pas à l'exécution — il faut rebuilder (`yarn build`) si l'une d'elles change.
+2. `cd frontend && yarn build`.
+3. Dépose le **contenu** du dossier `build/` (pas le dossier lui-même) dans `public_html` (ou le sous-dossier du domaine choisi) via FTP/gestionnaire de fichiers cPanel.
+4. `frontend/public/.htaccess` (fourni, copié automatiquement dans `build/` par `yarn build`) fait fonctionner les routes React (`/app/carte`, etc.) sur un rafraîchissement ou un lien direct — sans lui, Apache renvoie une 404. Si le site est servi depuis un sous-dossier plutôt que la racine du domaine, ajuste `RewriteBase` dans ce fichier.
+
+### Note mémoire (Windows local uniquement)
+
+Sur une machine Windows avec peu de RAM, `yarn build` peut planter avec un code de sortie non standard (ex. `3221225477`, un access violation) à cause de la minification parallèle de gros bundles (mapbox-gl). `frontend/craco.config.js` désactive déjà ce parallélisme ; en cas de plantage malgré tout, relance simplement la commande.

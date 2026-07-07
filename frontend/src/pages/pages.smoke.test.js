@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { AppDataProvider } from "@/context/AppDataContext";
 import { AuthProvider } from "@/context/AuthContext";
@@ -97,6 +97,42 @@ test("Register renders the form", () => {
 test("MapView renders the incident list", () => {
   renderAt("/carte", <Route path="/carte" element={<MapView />} />);
   expect(screen.getByText("Carte en direct")).toBeInTheDocument();
+});
+
+test("MapView's map fullscreen toggle switches on and off", () => {
+  renderAt("/carte", <Route path="/carte" element={<MapView />} />);
+  const toggle = screen.getByLabelText("Plein écran");
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+  fireEvent.click(toggle);
+  expect(screen.getByLabelText("Quitter le plein écran")).toHaveAttribute("aria-pressed", "true");
+
+  fireEvent.click(screen.getByLabelText("Quitter le plein écran"));
+  expect(screen.getByLabelText("Plein écran")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("MapView's fullscreen mode reveals the avant de partir trip planner", () => {
+  renderAt("/carte", <Route path="/carte" element={<MapView />} />);
+  expect(screen.queryByPlaceholderText("Point de départ")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText("Plein écran"));
+  expect(screen.getByPlaceholderText("Point de départ")).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("Destination")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText("Quitter le plein écran"));
+  expect(screen.queryByPlaceholderText("Point de départ")).not.toBeInTheDocument();
+});
+
+test("Trajet's own map fullscreen does not duplicate its trip planner", async () => {
+  renderAt("/trajet", <Route path="/trajet" element={<Trajet />} />);
+  fireEvent.change(screen.getByPlaceholderText("Point de départ"), { target: { value: "Cocody" } });
+  fireEvent.change(screen.getByPlaceholderText("Destination"), { target: { value: "Plateau" } });
+  fireEvent.click(screen.getByText(/Scanner l.itinéraire/));
+
+  // Trajet already has its own "avant de partir" search fields on the page —
+  // the map's internal planner must not double them up in fullscreen.
+  fireEvent.click(await screen.findByLabelText("Plein écran"));
+  expect(screen.getAllByPlaceholderText("Point de départ")).toHaveLength(1);
 });
 
 test("Feed renders posts", () => {

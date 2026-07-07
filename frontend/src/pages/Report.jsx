@@ -91,7 +91,9 @@ export default function Report() {
             </div>
             <h2 className="mt-5 font-display text-2xl font-semibold">Alerte envoyée !</h2>
             <p className="mt-1 text-sm text-muted-foreground max-w-xs">
-              Ta contribution est visible sur la carte et dans le fil. +15 pts 🔥
+              Ta contribution est visible sur la carte{canPostToFeed ? " et dans le fil" : ""}.
+              {/* Matches gamification.POINTS_PER_POST (backend) — keep in sync. */}
+              {canPostToFeed ? " +5 pts 🔥" : ""}
             </p>
           </motion.div>
         ) : step === 1 ? (

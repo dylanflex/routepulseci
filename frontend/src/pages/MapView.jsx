@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { TrafficMap, TrafficLegend } from "@/components/routepulse/TrafficMap";
+import { TrafficMap } from "@/components/routepulse/LazyTrafficMap";
+import { TrafficLegend } from "@/components/routepulse/TrafficLegend";
 import { INCIDENT_TYPES } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar, estimateDelayMin } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
@@ -34,9 +35,11 @@ export default function MapView() {
   const handleConfirmSelected = async () => {
     try {
       await confirmIncident(selected.id);
-      toast.success("Confirmation envoyée 💪");
+      if (!selected.confirmed_by_me) {
+        toast.success("Confirmation envoyée 💪");
+      }
     } catch (err) {
-      toast.error(err.message || "Confirmation impossible");
+      toast.error(err.message || "Confirmation impossible", { description: "Connecte-toi pour confirmer." });
     }
   };
 
@@ -169,8 +172,11 @@ export default function MapView() {
                   Les utilisateurs à proximité rapportent une {meta.label.toLowerCase()} confirmée. Une déviation par la voie parallèle est conseillée. Rejoins la discussion dans le fil.
                 </p>
                 <div className="mt-5 flex gap-2">
-                  <Button className="flex-1 rounded-xl bg-foreground text-background" onClick={handleConfirmSelected}>
-                    Confirmer
+                  <Button
+                    className={`flex-1 rounded-xl ${selected.confirmed_by_me ? "bg-accent text-accent-foreground" : "bg-foreground text-background"}`}
+                    onClick={handleConfirmSelected}
+                  >
+                    {selected.confirmed_by_me ? "Confirmé ✓" : "Confirmer"}
                   </Button>
                   <Button variant="outline" className="flex-1 rounded-xl" onClick={() => toast("Lien copié 🔗")}>
                     <Share2 className="w-4 h-4 mr-2" /> Partager

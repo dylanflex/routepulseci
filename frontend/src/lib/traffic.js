@@ -1,9 +1,17 @@
-import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat } from "lucide-react";
+import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat, ShieldCheck, Ban } from "lucide-react";
 import { TRAFFIC_LEVELS } from "@/lib/mockData";
 
 export const INCIDENT_ICONS = { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat };
 
 export const getIncidentIcon = (iconName) => INCIDENT_ICONS[iconName] || AlertTriangle;
+
+// Styling for the "avant de partir" AI/rules recommendation, keyed by level.
+// Shared by the Trajet page and the map's fullscreen trip planner.
+export const RECO_STYLE = {
+  clear: { icon: ShieldCheck, tone: "#2fb56b", bg: "rgba(47,181,107,0.10)" },
+  caution: { icon: ShieldAlert, tone: "#f59e0b", bg: "rgba(245,158,11,0.10)" },
+  avoid: { icon: Ban, tone: "#e0432c", bg: "rgba(224,67,44,0.10)" },
+};
 
 export const trafficColorVar = (level, opacity) =>
   opacity != null ? `hsl(var(--traffic-${level}) / ${opacity})` : `hsl(var(--traffic-${level}))`;

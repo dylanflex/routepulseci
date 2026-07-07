@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { BottomNav } from "@/components/routepulse/BottomNav";
 import { useAppData } from "@/context/AppDataContext";
@@ -115,7 +115,12 @@ export default function AppShell() {
       </header>
 
       <main className="mx-auto max-w-2xl pb-28">
-        <Outlet />
+        {/* Its own boundary so switching tabs (Carte/Fil/Trajet/...) only
+            blanks the page content while its chunk loads, not the header/nav
+            above and below — those stay mounted. */}
+        <Suspense fallback={null}>
+          <Outlet />
+        </Suspense>
       </main>
 
       <BottomNav />

@@ -14,13 +14,25 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, select
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    case,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette.middleware.cors import CORSMiddleware
 
 import ai
+import gamification
 import routing
+import seed_data
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -33,7 +45,8 @@ DATABASE_URL = os.environ.get(
 engine = create_async_engine(DATABASE_URL)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production")
+JWT_SECRET_DEFAULT = "dev-secret-change-in-production"
+JWT_SECRET = os.environ.get("JWT_SECRET", JWT_SECRET_DEFAULT)
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = 60 * 24 * 7
 
@@ -68,7 +81,11 @@ class IncidentORM(Base):
     lng: Mapped[float] = mapped_column(Float, nullable=False)
     road: Mapped[str] = mapped_column(String, nullable=False)
     severity: Mapped[str] = mapped_column(String, nullable=False)
-    confirmed: Mapped[int] = mapped_column(Integer, default=1)
+    # Starts at 0: an incident is a claim, not a fact, until someone else
+    # backs it up. Starting at 1 would let every fresh report masquerade as
+    # already community-validated, which is exactly the trust signal the
+    # "avant de partir" routing recommendation relies on.
+    confirmed: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -80,11 +97,14 @@ class PostORM(Base):
     id: Mapped[str] = mapped_column(
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    author_name: Mapped[str] = mapped_column(String, nullable=False)
-    author_handle: Mapped[str] = mapped_column(String, default="")
-    author_avatar: Mapped[str] = mapped_column(String, default="")
-    author_verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    author_badge: Mapped[str] = mapped_column(String, default="")
+    # The author's identity lives once in UserORM; name/avatar/badge are
+    # resolved live at read time (see resolve_authors) instead of copied onto
+    # every post. A copy would freeze a user's badge at whatever tier they had
+    # when they wrote *that* post, so the same author's older and newer posts
+    # would show two different badges as soon as they level up.
+    author_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False
+    )
     location: Mapped[str] = mapped_column(String, nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)
     severity: Mapped[str] = mapped_column(String, nullable=False)
@@ -93,7 +113,8 @@ class PostORM(Base):
     likes: Mapped[int] = mapped_column(Integer, default=0)
     comments_count: Mapped[int] = mapped_column(Integer, default=0)
     shares: Mapped[int] = mapped_column(Integer, default=0)
-    confirmed: Mapped[int] = mapped_column(Integer, default=1)
+    # Same reasoning as IncidentORM.confirmed: starts unvalidated.
+    confirmed: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -106,6 +127,14 @@ class CommentORM(Base):
         String, primary_key=True, default=lambda: str(uuid.uuid4())
     )
     post_id: Mapped[str] = mapped_column(String, ForeignKey("posts.id"), nullable=False)
+    # Nullable: seeded demo comments are attributed to their seeded account
+    # (see seed_dataset), but the column predates this and stays optional so a
+    # pre-existing row without one doesn't become unreadable. Lets a comment be
+    # tied to a real account instead of just a free-text display name — the
+    # difference between "attributable, moderatable" and not.
+    user_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True
+    )
     author: Mapped[str] = mapped_column(String, nullable=False)
     avatar: Mapped[str] = mapped_column(String, default="")
     text: Mapped[str] = mapped_column(String, nullable=False)
@@ -135,6 +164,20 @@ class PostConfirmORM(Base):
 
     post_id: Mapped[str] = mapped_column(
         String, ForeignKey("posts.id"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), primary_key=True
+    )
+
+
+# Same idempotency guard as PostConfirmORM, for incidents. Without it,
+# confirm_incident was a bare +1 anyone could script-replay indefinitely on
+# the exact data that drives the "avant de partir" avoid/reroute decision.
+class IncidentConfirmORM(Base):
+    __tablename__ = "incident_confirms"
+
+    incident_id: Mapped[str] = mapped_column(
+        String, ForeignKey("incidents.id"), primary_key=True
     )
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id"), primary_key=True
@@ -201,180 +244,115 @@ async def get_current_user_optional(
     return await session.get(UserORM, payload["sub"])
 
 
+async def seed_dataset(session: AsyncSession):
+    """Populate the DB with the full demo dataset (see seed_data.py).
+
+    Assumes the incident/post/user tables are empty. Shared by first-run
+    seeding (seed_if_empty) and the standalone reseed.py script.
+    """
+    now = datetime.now(timezone.utc)
+
+    # One bcrypt hash reused for every demo contributor — these accounts only
+    # exist to make community stats reflect a populated DB, they never log in.
+    shared_hash = hash_password(seed_data.DEMO_PASSWORD)
+    # seed_data.USERS' badge column is now just a human hint about the
+    # intended demo spread — actual badges are computed live from each
+    # account's real seeded posts/confirmations (see resolve_authors), so it
+    # isn't read here.
+    meta_by_username = {}
+    users = []
+    for username, display_name, avatar, _badge in seed_data.USERS:
+        meta_by_username[username] = (display_name, avatar)
+        users.append(
+            UserORM(
+                username=username,
+                display_name=display_name,
+                password_hash=shared_hash,
+                avatar=avatar,
+            )
+        )
+    session.add_all(users)
+    await session.flush()  # assign each user.id for the comment FK below
+    user_id_by_username = {u.username: u.id for u in users}
+
+    session.add_all(
+        [
+            IncidentORM(
+                type=itype,
+                lat=lat,
+                lng=lng,
+                road=road,
+                severity=severity,
+                confirmed=confirmed,
+                created_at=now - timedelta(minutes=age),
+            )
+            for (itype, lat, lng, road, severity, confirmed, age) in seed_data.INCIDENTS
+        ]
+    )
+
+    for (
+        username,
+        location,
+        ptype,
+        severity,
+        text,
+        image,
+        likes,
+        shares,
+        confirmed,
+        age,
+        comments,
+    ) in seed_data.POSTS:
+        post = PostORM(
+            author_id=user_id_by_username[username],
+            location=location,
+            type=ptype,
+            severity=severity,
+            text=text,
+            image=image,
+            likes=likes,
+            comments_count=len(comments),
+            shares=shares,
+            confirmed=confirmed,
+            created_at=now - timedelta(minutes=age),
+        )
+        session.add(post)
+        await session.flush()  # assign post.id for the comment FK
+        for c_user, c_text, c_likes, c_age in comments:
+            c_name, c_avatar = meta_by_username.get(c_user, (c_user, ""))
+            session.add(
+                CommentORM(
+                    post_id=post.id,
+                    # Seeded commenters are real (seeded) accounts, so attribute
+                    # the comment properly instead of leaving user_id empty.
+                    user_id=user_id_by_username.get(c_user),
+                    author=c_name,
+                    avatar=c_avatar,
+                    text=c_text,
+                    likes=c_likes,
+                    created_at=now - timedelta(minutes=c_age),
+                )
+            )
+
+    await session.commit()
+
+
 async def seed_if_empty(session: AsyncSession):
     existing = await session.execute(select(IncidentORM).limit(1))
     if existing.scalar_one_or_none() is not None:
         return
-
-    now = datetime.now(timezone.utc)
-    # Approximate real-world coordinates around Abidjan/Cocody, not surveyed road geometry.
-    session.add_all(
-        [
-            IncidentORM(
-                type="jam",
-                lat=5.3720,
-                lng=-3.9820,
-                road="Bd Latrille",
-                severity="blocked",
-                confirmed=12,
-                created_at=now - timedelta(minutes=6),
-            ),
-            IncidentORM(
-                type="accident",
-                lat=5.3210,
-                lng=-4.0190,
-                road="Bd de France",
-                severity="blocked",
-                confirmed=8,
-                created_at=now - timedelta(minutes=14),
-            ),
-            IncidentORM(
-                type="flood",
-                lat=5.3350,
-                lng=-3.9950,
-                road="Corniche",
-                severity="danger",
-                confirmed=21,
-                created_at=now - timedelta(minutes=3),
-            ),
-            IncidentORM(
-                type="degraded",
-                lat=5.3680,
-                lng=-3.9750,
-                road="Rue des Jardins",
-                severity="dense",
-                confirmed=4,
-                created_at=now - timedelta(minutes=32),
-            ),
-            IncidentORM(
-                type="works",
-                lat=5.3600,
-                lng=-3.9600,
-                road="Bd VGE",
-                severity="dense",
-                confirmed=3,
-                created_at=now - timedelta(minutes=60),
-            ),
-            IncidentORM(
-                type="police",
-                lat=5.3550,
-                lng=-3.9650,
-                road="Bd Giscard",
-                severity="fluid",
-                confirmed=2,
-                created_at=now - timedelta(minutes=18),
-            ),
-        ]
-    )
-
-    p1 = PostORM(
-        author_name="Aya K.",
-        author_handle="@aya_abj",
-        author_avatar="AK",
-        author_verified=True,
-        author_badge="Contributeur Or",
-        location="Cocody, Riviera 3",
-        type="jam",
-        severity="blocked",
-        text="Bouchon monstre sur la Riviera 3 après l'accident. Prendre le contournement par la Palmeraie 🙏 Ça n'avance plus depuis 20 min.",
-        image="https://images.unsplash.com/photo-1708347456872-6ebd105740de?w=900&q=80",
-        likes=142,
-        comments_count=3,
-        shares=34,
-        confirmed=18,
-        created_at=now - timedelta(minutes=8),
-    )
-    session.add_all(
-        [
-            p1,
-            PostORM(
-                author_name="Kouassi M.",
-                author_handle="@kouassi_m",
-                author_avatar="KM",
-                author_verified=False,
-                author_badge="Voisin vigilant",
-                location="Yopougon, Bd Principal",
-                type="degraded",
-                severity="dense",
-                text="Énorme nid de poule à Yop. Deux motos déjà tombées. Attention en venant du marché !",
-                image=None,
-                likes=87,
-                comments_count=0,
-                shares=19,
-                confirmed=9,
-                created_at=now - timedelta(minutes=22),
-            ),
-            PostORM(
-                author_name="Fatou D.",
-                author_handle="@fatoud",
-                author_avatar="FD",
-                author_verified=True,
-                author_badge="Ambassadeur",
-                location="Plateau, Bd Lagunaire",
-                type="flood",
-                severity="danger",
-                text="Inondation sévère au Plateau après la pluie. La lagune déborde côté Boulay. Évitez absolument.",
-                image="https://images.pexels.com/photos/7381785/pexels-photo-7381785.jpeg?w=900&q=80",
-                likes=312,
-                comments_count=0,
-                shares=128,
-                confirmed=42,
-                created_at=now - timedelta(minutes=41),
-            ),
-            PostORM(
-                author_name="Ibrahim S.",
-                author_handle="@ibs_ci",
-                author_avatar="IS",
-                author_verified=False,
-                author_badge="Nouveau",
-                location="Marcory Zone 4",
-                type="accident",
-                severity="blocked",
-                text="Collision entre un woro-woro et une berline au carrefour SOLIBRA. Les secours sont sur place.",
-                image=None,
-                likes=54,
-                comments_count=0,
-                shares=6,
-                confirmed=5,
-                created_at=now - timedelta(minutes=60),
-            ),
-        ]
-    )
-    await session.flush()
-
-    session.add_all(
-        [
-            CommentORM(
-                post_id=p1.id,
-                author="Serge B.",
-                avatar="SB",
-                text="Confirmé, je suis coincé depuis 15 min. Merci du signalement 🙏",
-                likes=12,
-                created_at=now - timedelta(minutes=6),
-            ),
-            CommentORM(
-                post_id=p1.id,
-                author="Awa T.",
-                avatar="AT",
-                text="Il y a une déviation par la rue des Jardins pour ceux qui viennent d'Angré.",
-                likes=8,
-                created_at=now - timedelta(minutes=4),
-            ),
-            CommentORM(
-                post_id=p1.id,
-                author="Moussa L.",
-                avatar="ML",
-                text="La police vient d'arriver, ça devrait bouger.",
-                likes=3,
-                created_at=now - timedelta(minutes=2),
-            ),
-        ]
-    )
-    await session.commit()
+    await seed_dataset(session)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Tokens signed with the built-in dev secret are forgeable — anyone can mint
+    # a valid token for any user. Loud warning so this never ships unnoticed.
+    if JWT_SECRET == JWT_SECRET_DEFAULT:
+        logging.warning(
+            "JWT_SECRET is the built-in dev default — set a real JWT_SECRET "
+            "before any real deployment (tokens are otherwise forgeable)."
+        )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with SessionLocal() as session:
@@ -441,7 +419,6 @@ class IncidentCreate(BaseModel):
 
 
 class IncidentOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
     id: str
     type: str
     lat: float
@@ -449,6 +426,7 @@ class IncidentOut(BaseModel):
     road: str
     severity: str
     confirmed: int
+    confirmed_by_me: bool
     created_at: datetime
 
 
@@ -493,6 +471,7 @@ class CommentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     post_id: str
+    user_id: str | None
     author: str
     avatar: str
     text: str
@@ -500,20 +479,53 @@ class CommentOut(BaseModel):
     created_at: datetime
 
 
+async def resolve_authors(
+    session: AsyncSession, user_ids: Collection[str]
+) -> dict[str, dict]:
+    """Live {name, handle, avatar, verified, badge} per user id, computed from
+    their current display name/avatar and total posts + confirmations — the
+    same tier calculation the leaderboard and /me/stats use. Batched by id so
+    listing N posts costs one query instead of N.
+    """
+    if not user_ids:
+        return {}
+    rows = await session.execute(
+        select(
+            UserORM.id,
+            UserORM.display_name,
+            UserORM.username,
+            UserORM.avatar,
+            func.count(PostORM.id),
+            func.coalesce(func.sum(PostORM.confirmed), 0),
+        )
+        .join(PostORM, PostORM.author_id == UserORM.id)
+        .where(UserORM.id.in_(user_ids))
+        .group_by(UserORM.id)
+    )
+    authors: dict[str, dict] = {}
+    for user_id, name, username, avatar, posts, confirmations in rows.all():
+        tier = gamification.tier_for_points(
+            gamification.points_for(posts, int(confirmations))
+        )
+        authors[user_id] = {
+            "name": name,
+            "handle": f"@{username}",
+            "avatar": avatar,
+            "verified": gamification.is_verified(tier),
+            "badge": tier,
+        }
+    return authors
+
+
 def serialize_post(
     p: PostORM,
+    author: dict,
     liked_ids: Collection[str] = (),
     confirmed_ids: Collection[str] = (),
 ) -> dict:
     return {
         "id": p.id,
-        "author": {
-            "name": p.author_name,
-            "handle": p.author_handle,
-            "avatar": p.author_avatar,
-            "verified": p.author_verified,
-            "badge": p.author_badge,
-        },
+        "author": author,
         "location": p.location,
         "type": p.type,
         "severity": p.severity,
@@ -529,6 +541,34 @@ def serialize_post(
     }
 
 
+def serialize_incident(inc: IncidentORM, confirmed_ids: Collection[str] = ()) -> dict:
+    return {
+        "id": inc.id,
+        "type": inc.type,
+        "lat": inc.lat,
+        "lng": inc.lng,
+        "road": inc.road,
+        "severity": inc.severity,
+        "confirmed": inc.confirmed,
+        "confirmed_by_me": inc.id in confirmed_ids,
+        "created_at": inc.created_at,
+    }
+
+
+async def user_incident_confirm_set(
+    user: UserORM | None, session: AsyncSession
+) -> set[str]:
+    """Incident ids the given user has confirmed (empty for anonymous)."""
+    if user is None:
+        return set()
+    result = await session.execute(
+        select(IncidentConfirmORM.incident_id).where(
+            IncidentConfirmORM.user_id == user.id
+        )
+    )
+    return set(result.scalars().all())
+
+
 async def user_post_vote_sets(
     user: UserORM | None, session: AsyncSession
 ) -> tuple[set[str], set[str]]:
@@ -542,6 +582,36 @@ async def user_post_vote_sets(
         select(PostConfirmORM.post_id).where(PostConfirmORM.user_id == user.id)
     )
     return set(liked.scalars().all()), set(confirmed.scalars().all())
+
+
+async def adjust_post_counter(
+    session: AsyncSession, post_id: str, column: str, delta: int
+) -> None:
+    """Atomically bump a post counter in SQL, floored at 0.
+
+    A read-modify-write in Python (post.likes += 1) drops updates when two
+    users vote on the same post concurrently — both read the same value and
+    one increment is lost. Doing it as a single UPDATE lets the database
+    serialize it. Portable across SQLite (default) and Postgres.
+    """
+    col = getattr(PostORM, column)
+    await session.execute(
+        update(PostORM)
+        .where(PostORM.id == post_id)
+        .values({column: case((col + delta < 0, 0), else_=col + delta)})
+    )
+
+
+async def adjust_incident_counter(
+    session: AsyncSession, incident_id: str, delta: int
+) -> None:
+    """Same atomic, floored-at-0 update as adjust_post_counter, for IncidentORM.confirmed."""
+    col = IncidentORM.confirmed
+    await session.execute(
+        update(IncidentORM)
+        .where(IncidentORM.id == incident_id)
+        .values(confirmed=case((col + delta < 0, 0), else_=col + delta))
+    )
 
 
 async def get_post_or_404(post_id: str, session: AsyncSession) -> PostORM:
@@ -607,33 +677,144 @@ async def me(current_user: UserORM = Depends(get_current_user)):
 
 
 @api_router.get("/incidents", response_model=List[IncidentOut])
-async def list_incidents(session: AsyncSession = Depends(get_session)):
+async def list_incidents(
+    current_user: UserORM | None = Depends(get_current_user_optional),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(
         select(IncidentORM).order_by(IncidentORM.created_at.desc())
     )
-    return result.scalars().all()
+    confirmed_ids = await user_incident_confirm_set(current_user, session)
+    return [serialize_incident(i, confirmed_ids) for i in result.scalars().all()]
+
+
+@api_router.get("/stats")
+async def community_stats(session: AsyncSession = Depends(get_session)):
+    """Live community numbers for the landing page — derived from the real DB
+    instead of hardcoded marketing figures."""
+    active_alerts = await session.scalar(select(func.count()).select_from(IncidentORM))
+    # People who have actually posted, not every registered account — a more
+    # honest "community" number that a signed-up lurker doesn't inflate.
+    contributors = await session.scalar(
+        select(func.count(func.distinct(PostORM.author_id)))
+    )
+    reports = await session.scalar(select(func.count()).select_from(PostORM))
+    confirmations = await session.scalar(
+        select(func.coalesce(func.sum(IncidentORM.confirmed), 0))
+    )
+    return {
+        "activeAlerts": active_alerts or 0,
+        "contributors": contributors or 0,
+        "reports": reports or 0,
+        "confirmations": int(confirmations or 0),
+        "citiesCovered": 1,  # Abidjan today; grows as coverage expands.
+    }
+
+
+# --- Community ranking (gamification) ------------------------------------
+
+
+@api_router.get("/leaderboard")
+async def leaderboard(limit: int = 10, session: AsyncSession = Depends(get_session)):
+    """Top contributors by points, derived live from posts + confirmations
+    received. Drives the engagement loop (see gamification.py)."""
+    rows = await session.execute(
+        select(
+            UserORM.display_name,
+            UserORM.username,
+            UserORM.avatar,
+            func.count(PostORM.id).label("posts"),
+            func.coalesce(func.sum(PostORM.confirmed), 0).label("confirmations"),
+        )
+        .join(PostORM, PostORM.author_id == UserORM.id)
+        .group_by(UserORM.id)
+    )
+    entries = []
+    for name, username, avatar, posts, confirmations in rows.all():
+        pts = gamification.points_for(posts, int(confirmations))
+        entries.append(
+            {
+                "name": name,
+                "handle": f"@{username}",
+                "avatar": avatar,
+                "posts": posts,
+                "confirmations": int(confirmations),
+                "points": pts,
+                "tier": gamification.tier_for_points(pts),
+            }
+        )
+    entries.sort(key=lambda e: e["points"], reverse=True)
+    for rank, entry in enumerate(entries, start=1):
+        entry["rank"] = rank
+    return entries[: max(1, limit)]
+
+
+@api_router.get("/me/stats")
+async def my_stats(
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The signed-in user's contribution points, tier and distance to the next
+    tier — the "what do I need to level up" data for the profile."""
+    posts, confirmations = (
+        await session.execute(
+            select(func.count(), func.coalesce(func.sum(PostORM.confirmed), 0)).where(
+                PostORM.author_id == current_user.id
+            )
+        )
+    ).one()
+    confirmations = int(confirmations)
+    points = gamification.points_for(posts, confirmations)
+    tier = gamification.tier_for_points(points)
+    return {
+        "posts": posts,
+        "confirmations": confirmations,
+        "points": points,
+        "tier": tier,
+        "verified": gamification.is_verified(tier),
+        "next_tier": gamification.next_tier(points),
+    }
 
 
 @api_router.post("/incidents", response_model=IncidentOut)
 async def create_incident(
     payload: IncidentCreate, session: AsyncSession = Depends(get_session)
 ):
+    # Reporting stays anonymous by product choice (no account needed to warn
+    # others). Confirming, below, is the trust signal and is not anonymous.
     incident = IncidentORM(**payload.model_dump())
     session.add(incident)
     await session.commit()
     await session.refresh(incident)
-    return incident
+    return serialize_incident(incident)
 
 
 @api_router.post("/incidents/{incident_id}/confirm", response_model=IncidentOut)
 async def confirm_incident(
-    incident_id: str, session: AsyncSession = Depends(get_session)
+    incident_id: str,
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
 ):
+    # Toggle, one confirmation per user — same idempotent pattern as
+    # confirm_post. An unconditional +1 here would let a single script inflate
+    # the exact signal the "avant de partir" avoid/reroute decision reads.
     incident = await get_incident_or_404(incident_id, session)
-    incident.confirmed += 1
+    existing = await session.get(
+        IncidentConfirmORM, {"incident_id": incident_id, "user_id": current_user.id}
+    )
+    if existing is not None:
+        await session.delete(existing)
+        await adjust_incident_counter(session, incident_id, -1)
+        confirmed_ids: set[str] = set()
+    else:
+        session.add(
+            IncidentConfirmORM(incident_id=incident_id, user_id=current_user.id)
+        )
+        await adjust_incident_counter(session, incident_id, 1)
+        confirmed_ids = {incident_id}
     await session.commit()
     await session.refresh(incident)
-    return incident
+    return serialize_incident(incident, confirmed_ids)
 
 
 @api_router.get("/road-conditions")
@@ -716,8 +897,12 @@ async def list_posts(
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(select(PostORM).order_by(PostORM.created_at.desc()))
+    posts = result.scalars().all()
     liked_ids, confirmed_ids = await user_post_vote_sets(current_user, session)
-    return [serialize_post(p, liked_ids, confirmed_ids) for p in result.scalars().all()]
+    authors = await resolve_authors(session, {p.author_id for p in posts})
+    return [
+        serialize_post(p, authors[p.author_id], liked_ids, confirmed_ids) for p in posts
+    ]
 
 
 @api_router.post("/posts", response_model=PostOut)
@@ -726,18 +911,14 @@ async def create_post(
     current_user: UserORM = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = PostORM(
-        author_name=current_user.display_name,
-        author_handle=f"@{current_user.username}",
-        author_avatar=current_user.avatar,
-        author_verified=False,
-        author_badge="Contributeur",
-        **payload.model_dump(),
-    )
+    post = PostORM(author_id=current_user.id, **payload.model_dump())
     session.add(post)
     await session.commit()
     await session.refresh(post)
-    return serialize_post(post)
+    # Badge = earned tier (this post included), so the feed shows real
+    # standing instead of a value frozen at whatever tier existed pre-post.
+    authors = await resolve_authors(session, {current_user.id})
+    return serialize_post(post, authors[current_user.id])
 
 
 @api_router.post("/posts/{post_id}/like", response_model=PostOut)
@@ -753,16 +934,19 @@ async def like_post(
     )
     if existing is not None:
         await session.delete(existing)
-        post.likes = max(0, post.likes - 1)
+        await adjust_post_counter(session, post_id, "likes", -1)
         liked = False
     else:
         session.add(PostLikeORM(post_id=post_id, user_id=current_user.id))
-        post.likes += 1
+        await adjust_post_counter(session, post_id, "likes", 1)
         liked = True
     await session.commit()
     await session.refresh(post)
     _, confirmed_ids = await user_post_vote_sets(current_user, session)
-    return serialize_post(post, {post_id} if liked else set(), confirmed_ids)
+    authors = await resolve_authors(session, {post.author_id})
+    return serialize_post(
+        post, authors[post.author_id], {post_id} if liked else set(), confirmed_ids
+    )
 
 
 @api_router.post("/posts/{post_id}/confirm", response_model=PostOut)
@@ -778,16 +962,19 @@ async def confirm_post(
     )
     if existing is not None:
         await session.delete(existing)
-        post.confirmed = max(0, post.confirmed - 1)
+        await adjust_post_counter(session, post_id, "confirmed", -1)
         confirmed = False
     else:
         session.add(PostConfirmORM(post_id=post_id, user_id=current_user.id))
-        post.confirmed += 1
+        await adjust_post_counter(session, post_id, "confirmed", 1)
         confirmed = True
     await session.commit()
     await session.refresh(post)
     liked_ids, _ = await user_post_vote_sets(current_user, session)
-    return serialize_post(post, liked_ids, {post_id} if confirmed else set())
+    authors = await resolve_authors(session, {post.author_id})
+    return serialize_post(
+        post, authors[post.author_id], liked_ids, {post_id} if confirmed else set()
+    )
 
 
 # --- Comments -----------------------------------------------------------
@@ -814,12 +1001,13 @@ async def create_comment(
     post = await get_post_or_404(post_id, session)
     comment = CommentORM(
         post_id=post_id,
+        user_id=current_user.id,
         author=current_user.display_name,
         avatar=current_user.avatar,
         **payload.model_dump(),
     )
     session.add(comment)
-    post.comments_count += 1
+    await adjust_post_counter(session, post_id, "comments_count", 1)
     await session.commit()
     await session.refresh(comment)
     return comment

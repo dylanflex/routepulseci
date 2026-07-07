@@ -27,6 +27,9 @@ export const api = {
   me: () => request("/auth/me"),
 
   listIncidents: () => request("/incidents"),
+  stats: () => request("/stats"),
+  leaderboard: (limit = 10) => request(`/leaderboard?limit=${limit}`),
+  myStats: () => request("/me/stats"),
   roadConditions: () => request("/road-conditions"),
   createIncident: (body) => request("/incidents", { method: "POST", body: JSON.stringify(body) }),
   confirmIncident: (id) => request(`/incidents/${id}/confirm`, { method: "POST" }),
@@ -40,5 +43,7 @@ export const api = {
   createComment: (postId, body) => request(`/posts/${postId}/comments`, { method: "POST", body: JSON.stringify(body) }),
 
   scanRoute: (body) => request("/route/scan", { method: "POST", body: JSON.stringify(body) }),
-  suggestPlaces: (q) => request(`/geocode/suggest?q=${encodeURIComponent(q)}`),
+  // `signal` lets callers abort a stale in-flight suggestion request (see
+  // PlaceField) instead of letting it race a newer one to the UI.
+  suggestPlaces: (q, { signal } = {}) => request(`/geocode/suggest?q=${encodeURIComponent(q)}`, { signal }),
 };

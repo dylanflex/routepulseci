@@ -45,6 +45,13 @@ function AppData({ children }) {
     refetchOnWindowFocus: true,
   });
   const postsQuery = useQuery({ queryKey: ["posts"], queryFn: api.listPosts });
+  // Live community numbers for the landing page (replaces hardcoded figures).
+  const statsQuery = useQuery({ queryKey: ["stats"], queryFn: api.stats });
+  // Top contributors — the community ranking that drives engagement.
+  const leaderboardQuery = useQuery({
+    queryKey: ["leaderboard"],
+    queryFn: () => api.leaderboard(10),
+  });
   // Real road-condition segments (coloured by nearby incidents), polled with the map.
   const roadConditionsQuery = useQuery({
     queryKey: ["road-conditions"],
@@ -114,6 +121,8 @@ function AppData({ children }) {
     posts: postsQuery.data ?? [],
     incidents: incidentsQuery.data ?? [],
     roadConditions: roadConditionsQuery.data ?? [],
+    stats: statsQuery.data ?? null,
+    leaderboard: leaderboardQuery.data ?? [],
     incidentsUpdatedAt: incidentsQuery.dataUpdatedAt,
     incidentsFetching: incidentsQuery.isFetching,
     refetchIncidents: incidentsQuery.refetch,

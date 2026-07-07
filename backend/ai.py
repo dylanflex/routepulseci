@@ -10,10 +10,15 @@ useful.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import List, Optional
 
 from dotenv import load_dotenv
+
+import routing
+
+logger = logging.getLogger(__name__)
 
 # See routing.py: load backend/.env at import so the key is seen regardless of
 # import order. override=False keeps test-set env vars authoritative.
@@ -37,7 +42,7 @@ _RECO_SCHEMA = {
 
 def _rules_reco(alerts: List[dict], reroute: Optional[dict]) -> dict:
     """Deterministic fallback used when Claude isn't available."""
-    severe = [a for a in alerts if a["severity"] in ("blocked", "danger")]
+    severe = [a for a in alerts if a["severity"] in routing.SEVERE_SEVERITIES]
     if not alerts:
         return {
             "level": "clear",
@@ -117,5 +122,10 @@ async def recommend(
             "source": "ai",
         }
     except Exception:
-        # Any API/parse failure: never break the scan, fall back to rules.
+        # Any API/parse failure: never break the scan, fall back to rules — but
+        # log it, otherwise a misconfigured key or API change silently degrades
+        # the "IA" recommendation to the rule-based one with no trace.
+        logger.warning(
+            "Claude recommendation failed; using rule-based fallback", exc_info=True
+        )
         return _rules_reco(alerts, reroute)

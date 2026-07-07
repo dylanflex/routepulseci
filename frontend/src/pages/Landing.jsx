@@ -5,16 +5,19 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { TrafficMap, TrafficLegend } from "@/components/routepulse/TrafficMap";
+import { TrafficMap } from "@/components/routepulse/LazyTrafficMap";
+import { TrafficLegend } from "@/components/routepulse/TrafficLegend";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 import { StatChip } from "@/components/routepulse/StatChip";
-import { STATS } from "@/lib/mockData";
 import { useAppData } from "@/context/AppDataContext";
+
+// French-formatted number with a graceful placeholder while stats load.
+const fmtStat = (n) => (typeof n === "number" ? n.toLocaleString("fr-FR") : "…");
 import {
-  ArrowRight, Zap, ShieldCheck, Users, MapPin, Sparkles, TrendingUp, Clock,
+  ArrowRight, Zap, ShieldCheck, MapPin, Sparkles, TrendingUp, Clock,
   MessageCircleHeart, Layers, LineChart, Menu, X, Bell, Heart,
-  Building2, Truck, Landmark, ChevronDown, Play, Route as RouteIcon,
-  Camera, Send, Radio, Activity
+  Play, Route as RouteIcon,
+  Camera, Send, Radio, Activity, Trophy
 } from "lucide-react";
 import { useState } from "react";
 
@@ -36,7 +39,6 @@ const Nav = () => {
             <a href="#fonctionnalites" className="hover:text-foreground transition-colors">Fonctionnalités</a>
             <a href="#communaute" className="hover:text-foreground transition-colors">Communauté</a>
             <a href="#carte" className="hover:text-foreground transition-colors">La carte</a>
-            <a href="#pour-qui" className="hover:text-foreground transition-colors">Pour qui ?</a>
             <a href="#faq" className="hover:text-foreground transition-colors">FAQ</a>
           </nav>
           <div className="flex items-center gap-2">
@@ -58,7 +60,6 @@ const Nav = () => {
             <a href="#fonctionnalites" onClick={() => setOpen(false)} className="px-3 py-2 rounded-lg hover:bg-muted">Fonctionnalités</a>
             <a href="#communaute" onClick={() => setOpen(false)} className="px-3 py-2 rounded-lg hover:bg-muted">Communauté</a>
             <a href="#carte" onClick={() => setOpen(false)} className="px-3 py-2 rounded-lg hover:bg-muted">La carte</a>
-            <a href="#pour-qui" onClick={() => setOpen(false)} className="px-3 py-2 rounded-lg hover:bg-muted">Pour qui ?</a>
             <a href="#faq" onClick={() => setOpen(false)} className="px-3 py-2 rounded-lg hover:bg-muted">FAQ</a>
           </div>
         )}
@@ -67,7 +68,9 @@ const Nav = () => {
   );
 };
 
-const Hero = () => (
+const Hero = () => {
+  const { stats } = useAppData();
+  return (
   <section className="relative pt-28 pb-16 sm:pt-36 sm:pb-24 overflow-hidden">
     {/* Background */}
     <div className="absolute inset-0 -z-10">
@@ -85,7 +88,7 @@ const Hero = () => (
           className="lg:col-span-6"
         >
           <Badge variant="outline" className="rounded-full border-primary/25 bg-primary/5 text-primary px-3 py-1 mb-5">
-            <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Alpha · Abidjan · 12 840 contributeurs
+            <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Alpha · Abidjan · {fmtStat(stats?.contributors)} contributeurs
           </Badge>
           <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-semibold leading-[1.05] text-foreground">
             La route côte d’Ivoire,
@@ -111,19 +114,19 @@ const Hero = () => (
             </Link>
           </div>
 
-          {/* trust row */}
+          {/* trust row — live figures from the API */}
           <div className="mt-8 grid grid-cols-3 gap-4 max-w-md">
             <div>
-              <p className="font-display text-2xl font-semibold text-foreground">{STATS.activeAlerts}</p>
+              <p className="font-display text-2xl font-semibold text-foreground">{fmtStat(stats?.activeAlerts)}</p>
               <p className="text-xs text-muted-foreground">alertes actives</p>
             </div>
             <div>
-              <p className="font-display text-2xl font-semibold text-foreground">{(STATS.contributors/1000).toFixed(1)}k</p>
+              <p className="font-display text-2xl font-semibold text-foreground">{fmtStat(stats?.contributors)}</p>
               <p className="text-xs text-muted-foreground">contributeurs</p>
             </div>
             <div>
-              <p className="font-display text-2xl font-semibold text-foreground">{STATS.timeSaved}</p>
-              <p className="text-xs text-muted-foreground">gagné / mois</p>
+              <p className="font-display text-2xl font-semibold text-foreground">{fmtStat(stats?.confirmations)}</p>
+              <p className="text-xs text-muted-foreground">confirmations</p>
             </div>
           </div>
         </motion.div>
@@ -176,7 +179,7 @@ const Hero = () => (
                 </div>
                 {/* Map inside phone */}
                 <div className="absolute inset-0">
-                  <TrafficMap />
+                  <TrafficMap allowFullscreen={false} />
                 </div>
                 {/* Bottom sheet */}
                 <div className="absolute bottom-3 inset-x-3 glass rounded-2xl p-3 shadow-elevated">
@@ -196,24 +199,10 @@ const Hero = () => (
           </div>
         </motion.div>
       </div>
-
-      {/* logos row */}
-      <div className="mt-16 sm:mt-20 pt-8 border-t border-border/60">
-        <p className="text-center text-xs uppercase tracking-widest text-muted-foreground mb-4">
-          Pensé pour l’État, les assureurs, les flottes et les citoyens
-        </p>
-        <div className="flex flex-wrap justify-center items-center gap-x-10 gap-y-3 text-muted-foreground/60 font-display font-semibold">
-          <span>Ministère Équipement</span>
-          <span>NSIA</span>
-          <span>Sotra</span>
-          <span>Yango</span>
-          <span>Orange CI</span>
-          <span>MTN CI</span>
-        </div>
-      </div>
     </div>
   </section>
-);
+  );
+};
 
 const Features = () => {
   const features = [
@@ -262,7 +251,9 @@ const Features = () => {
   );
 };
 
-const LiveMapSection = () => (
+const LiveMapSection = () => {
+  const { stats } = useAppData();
+  return (
   <section id="carte" className="py-20 sm:py-28 bg-gradient-surface relative overflow-hidden">
     <div className="absolute -top-40 -left-20 w-96 h-96 bg-accent/20 rounded-full blur-[100px]" />
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative">
@@ -301,12 +292,12 @@ const LiveMapSection = () => (
         <div className="lg:col-span-7">
           <div className="relative rounded-3xl border border-border bg-card shadow-elevated p-3 overflow-hidden">
             <div className="aspect-[4/3] w-full rounded-2xl overflow-hidden">
-              <TrafficMap />
+              <TrafficMap allowFullscreen={false} />
             </div>
             <div className="absolute top-6 left-6 glass rounded-xl px-3 py-2 shadow-soft">
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Abidjan · Live</p>
               <p className="text-sm font-display font-semibold text-foreground flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" /> {STATS.activeAlerts} alertes
+                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" /> {fmtStat(stats?.activeAlerts)} alertes
               </p>
             </div>
             <div className="absolute bottom-6 left-6 right-6">
@@ -317,10 +308,12 @@ const LiveMapSection = () => (
       </div>
     </div>
   </section>
-);
+  );
+};
 
 const CommunitySection = () => {
-  const { posts } = useAppData();
+  const { posts, stats, leaderboard } = useAppData();
+  const topContributors = leaderboard.slice(0, 3);
   return (
   <section id="communaute" className="py-20 sm:py-28">
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -335,14 +328,40 @@ const CommunitySection = () => {
             un fil de discussion sauvant du temps — et des vies.
           </p>
           <div className="mt-6 grid grid-cols-2 gap-3">
-            <StatChip label="Posts / jour" value="1 240" icon={Send} tone="primary" />
-            <StatChip label="Confirmations" value="8 507" icon={ShieldCheck} tone="accent" />
-            <StatChip label="Photos partagées" value="312" icon={Camera} tone="primary" />
-            <StatChip label="Villes couvertes" value={STATS.citiesCovered} icon={MapPin} tone="accent" />
+            <StatChip label="Signalements" value={fmtStat(stats?.reports)} icon={Send} tone="primary" />
+            <StatChip label="Confirmations" value={fmtStat(stats?.confirmations)} icon={ShieldCheck} tone="accent" />
+            <StatChip label="Alertes actives" value={fmtStat(stats?.activeAlerts)} icon={Camera} tone="primary" />
+            <StatChip label="Villes couvertes" value={fmtStat(stats?.citiesCovered)} icon={MapPin} tone="accent" />
           </div>
         </div>
 
         <div className="lg:col-span-7 space-y-4">
+          {topContributors.length > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-soft">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-primary" />
+                <h3 className="font-display font-semibold text-sm">Top contributeurs de la semaine</h3>
+              </div>
+              <div className="mt-4 space-y-3">
+                {topContributors.map((c, i) => (
+                  <div key={c.handle} className="flex items-center gap-3">
+                    <span className="text-lg w-6 text-center">{["🥇", "🥈", "🥉"][i]}</span>
+                    <div className="w-9 h-9 rounded-full bg-gradient-hero text-primary-foreground flex items-center justify-center text-xs font-semibold flex-shrink-0">
+                      {c.avatar || c.name.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate">{c.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{c.tier} · {c.posts} signalement{c.posts > 1 ? "s" : ""}</p>
+                    </div>
+                    <span className="font-display font-semibold text-sm">{fmtStat(c.points)}<span className="text-[10px] text-muted-foreground font-medium ml-0.5">pts</span></span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-4 text-xs text-muted-foreground">
+                Signale, fais confirmer tes alertes, gravis les paliers — de Nouveau à Ambassadeur.
+              </p>
+            </div>
+          )}
           {posts.slice(0, 2).map((post) => (
             <AlertPost key={post.id} post={post} compact />
           ))}
@@ -350,52 +369,6 @@ const CommunitySection = () => {
       </div>
     </div>
   </section>
-  );
-};
-
-const ForWho = () => {
-  const personas = [
-    { icon: Users, title: "Conducteurs & piétons", color: "primary", benefits: ["Alertes temps réel", "Déviations proposées", "Feed local animé"] },
-    { icon: Building2, title: "Assureurs", color: "info", benefits: ["Scoring de risque zone", "Historique sinistres", "Ajustement des primes"] },
-    { icon: Truck, title: "Flottes & logistique", color: "accent", benefits: ["Optimisation d’itinéraires", "Alertes conducteurs", "Rapports mensuels"] },
-    { icon: Landmark, title: "Décideurs publics", color: "warning", benefits: ["Priorisation budget réparation", "Cartographie du réseau", "Impact avant/après"] },
-  ];
-  return (
-    <section id="pour-qui" className="py-20 sm:py-28 bg-gradient-surface">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="max-w-2xl mx-auto text-center">
-          <Badge variant="outline" className="rounded-full border-primary/25 bg-primary/5 text-primary">Pour qui ?</Badge>
-          <h2 className="mt-3 font-display text-3xl sm:text-4xl lg:text-5xl font-semibold text-foreground leading-tight">
-            Une donnée, quatre <span className="text-primary">super-pouvoirs</span>.
-          </h2>
-          <p className="mt-4 text-muted-foreground">
-            Gratuit pour les citoyens. Un tableau de bord premium pour les décideurs, assureurs et flottes.
-          </p>
-        </div>
-
-        <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {personas.map((p) => (
-            <Card key={p.title} className="rounded-2xl p-6 border-border shadow-soft flex flex-col">
-              <div className={`w-11 h-11 rounded-xl flex items-center justify-center bg-${p.color}/10 text-${p.color}`}>
-                <p.icon className="w-5 h-5" style={{ color: `hsl(var(--${p.color}))` }} />
-              </div>
-              <h3 className="mt-4 font-display text-lg font-semibold">{p.title}</h3>
-              <ul className="mt-3 space-y-2 flex-1">
-                {p.benefits.map((b) => (
-                  <li key={b} className="text-sm text-muted-foreground flex items-start gap-2">
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
-                    {b}
-                  </li>
-                ))}
-              </ul>
-              <Button variant="ghost" size="sm" className="mt-auto justify-start px-0 text-primary hover:text-primary hover:bg-transparent">
-                En savoir plus <ArrowRight className="w-4 h-4 ml-1" />
-              </Button>
-            </Card>
-          ))}
-        </div>
-      </div>
-    </section>
   );
 };
 
@@ -472,7 +445,7 @@ const FAQ = () => (
           { q: "L’app est-elle vraiment gratuite ?", a: "Oui, 100% gratuite pour les citoyens. Le modèle économique repose sur les tableaux de bord B2B (assureurs, flottes, État)." },
           { q: "Comment êtes-vous sûrs que l’info est fiable ?", a: "On croise plusieurs signalements du même type dans un périmètre / une fenêtre temporelle. Une alerte devient «zone confirmée» après N validations." },
           { q: "Faut-il créer un compte ?", a: "Non. Tu peux signaler sans compte. Créer un profil te donne accès au fil social et à tes badges de contributeur." },
-          { q: "Dans quelles villes êtes-vous disponibles ?", a: "Abidjan, Yamoussoukro, Bouaké, San Pedro, Korhogo, Man. On avance ville par ville." },
+          { q: "Dans quelles villes êtes-vous disponibles ?", a: "Abidjan pour l’instant — signalement, carte et « avant de partir » y sont pleinement fonctionnels. L’extension aux autres villes ivoiriennes est notre prochaine étape." },
           { q: "Comment sont traitées mes données ?", a: "Position uniquement au moment du signalement. Anonymisation par défaut. Aucun tracking permanent." },
         ].map((item, i) => (
           <AccordionItem key={i} value={`item-${i}`} className="bg-card border border-border rounded-2xl px-5 shadow-soft">
@@ -487,7 +460,9 @@ const FAQ = () => (
   </section>
 );
 
-const CTA = () => (
+const CTA = () => {
+  const { stats } = useAppData();
+  return (
   <section className="py-20 sm:py-28">
     <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
       <div className="relative overflow-hidden rounded-3xl bg-gradient-dark p-10 sm:p-16 shadow-elevated">
@@ -495,7 +470,7 @@ const CTA = () => (
         <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-accent/30 rounded-full blur-[100px]" />
         <div className="relative max-w-2xl">
           <h2 className="font-display text-3xl sm:text-4xl lg:text-5xl font-semibold text-white leading-tight">
-            Rejoins les 12 840 citoyens qui rendent la route <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary-glow to-warning">plus sûre.</span>
+            Rejoins les {fmtStat(stats?.contributors)} citoyens qui rendent la route <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary-glow to-warning">plus sûre.</span>
           </h2>
           <p className="mt-4 text-white/70">
             2 minutes pour t’installer. 3 secondes par signalement. Un impact toute la journée.
@@ -506,15 +481,13 @@ const CTA = () => (
                 Ouvrir RoutePulse <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
-            <Button size="lg" variant="outline" className="rounded-xl h-12 px-6 bg-white/10 text-white border-white/20 hover:bg-white/20">
-              Contact B2B
-            </Button>
           </div>
         </div>
       </div>
     </div>
   </section>
-);
+  );
+};
 
 const Footer = () => (
   <footer className="border-t border-border py-10">
@@ -544,7 +517,6 @@ export default function Landing() {
       <Features />
       <LiveMapSection />
       <CommunitySection />
-      <ForWho />
       <HowItWorks />
       <Testimonials />
       <FAQ />

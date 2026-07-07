@@ -1,93 +1,25 @@
-import React, { useEffect, useRef, useState } from "react";
-import { TrafficMap } from "@/components/routepulse/TrafficMap";
-import { Input } from "@/components/ui/input";
+import React, { useState } from "react";
+import { TrafficMap } from "@/components/routepulse/LazyTrafficMap";
+import { PlaceField } from "@/components/routepulse/PlaceField";
+import { VoiceToggle } from "@/components/routepulse/VoiceToggle";
 import { Button } from "@/components/ui/button";
 import { INCIDENT_TYPES } from "@/lib/mockData";
-import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
+import { getIncidentIcon, trafficColorVar, RECO_STYLE } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { api } from "@/lib/api";
 import { getCurrentPosition } from "@/lib/geo";
+import { speak } from "@/lib/voice";
 import { toast } from "sonner";
 import {
   ArrowRight, Clock, TrendingDown, AlertTriangle, Search, Route as RouteIcon,
-  Sparkles, ShieldCheck, ShieldAlert, Ban, MapPin, LocateFixed, Check,
+  Sparkles, LocateFixed, Check,
 } from "lucide-react";
 
-const RECO_STYLE = {
-  clear: { icon: ShieldCheck, tone: "#2fb56b", bg: "rgba(47,181,107,0.10)" },
-  caution: { icon: ShieldAlert, tone: "#f59e0b", bg: "rgba(245,158,11,0.10)" },
-  avoid: { icon: Ban, tone: "#e0432c", bg: "rgba(224,67,44,0.10)" },
-};
-
-// Input with debounced address autocomplete backed by GET /api/geocode/suggest.
-function PlaceField({ value, onType, onPick, placeholder, dotColor, trailing }) {
-  const [open, setOpen] = useState(false);
-  const [items, setItems] = useState([]);
-  const [focused, setFocused] = useState(false);
-  const skipRef = useRef(false); // don't re-query right after a pick
-
-  useEffect(() => {
-    if (!focused) return;
-    if (skipRef.current) {
-      skipRef.current = false;
-      return;
-    }
-    const q = value.trim();
-    if (q.length < 2) {
-      setItems([]);
-      setOpen(false);
-      return;
-    }
-    const t = setTimeout(async () => {
-      try {
-        const res = await api.suggestPlaces(q);
-        setItems(res);
-        setOpen(res.length > 0);
-      } catch {
-        // Autocomplete is best-effort; a failed lookup shouldn't disrupt typing.
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [value, focused]);
-
-  return (
-    <div className="relative">
-      <div className="flex items-center gap-2 p-3 rounded-xl bg-muted/60">
-        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: dotColor }} />
-        <Input
-          value={value}
-          onChange={(e) => onType(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => { setFocused(false); setOpen(false); }, 150)}
-          className="border-0 bg-transparent focus-visible:ring-0 h-8 p-0 text-sm"
-          placeholder={placeholder}
-        />
-        {trailing}
-      </div>
-      {open && (
-        <div className="absolute z-20 left-0 right-0 mt-1 rounded-xl border border-border bg-popover shadow-elevated overflow-hidden">
-          {items.map((it, i) => (
-            <button
-              key={`${it.name}-${i}`}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { skipRef.current = true; onPick(it); setOpen(false); }}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2"
-            >
-              <MapPin className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-              <span className="truncate">{it.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Trajet() {
-  const [from, setFrom] = useState("Cocody Riviera 3");
-  const [fromSend, setFromSend] = useState("Cocody Riviera 3");
-  const [to, setTo] = useState("Plateau, Immeuble CCIA");
-  const [toSend, setToSend] = useState("Plateau, Immeuble CCIA");
+  const [from, setFrom] = useState("");
+  const [fromSend, setFromSend] = useState("");
+  const [to, setTo] = useState("");
+  const [toSend, setToSend] = useState("");
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
   const [result, setResult] = useState(null);
@@ -100,6 +32,9 @@ export default function Trajet() {
     try {
       const data = await api.scanRoute({ from: fromSend, to: toSend });
       setResult(data);
+      if (data.recommendation) {
+        speak(`${data.recommendation.title}. ${data.recommendation.message}`);
+      }
     } catch (err) {
       toast.error(err.message || "Impossible de scanner l'itinéraire");
     } finally {
@@ -193,13 +128,14 @@ export default function Trajet() {
                   </p>
                   <p className="text-sm mt-0.5 text-foreground/85">{reco.message}</p>
                 </div>
+                <VoiceToggle />
               </div>
             </div>
           )}
 
           <div className="mt-4 rounded-2xl overflow-hidden border border-border bg-card">
             <div className="aspect-[4/3]">
-              <TrafficMap routeLine={primaryRoute} altRouteLine={secondaryRoute} />
+              <TrafficMap routeLine={primaryRoute} altRouteLine={secondaryRoute} showRoutePlanner={false} />
             </div>
           </div>
 

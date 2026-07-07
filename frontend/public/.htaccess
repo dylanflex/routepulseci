@@ -1,0 +1,31 @@
+# Served as-is inside the CRA build output (this file lives in `public/`, so
+# `yarn build` copies it straight into `build/.htaccess`) — needed on Apache
+# hosts like LWS mutualisé so client-side routes (e.g. /app/carte) resolve on
+# a hard refresh or direct link instead of 404ing.
+#
+# If the site is deployed under a subfolder rather than the domain root,
+# change RewriteBase to that subfolder (e.g. "/routepulse/").
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Real files and directories (JS/CSS/images/etc.) are served normally.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Everything else falls back to index.html so react-router can handle it.
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Basic caching for hashed static assets (CRA fingerprints JS/CSS filenames,
+# so a long cache lifetime is safe — a new deploy ships new filenames).
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType text/html "access plus 0 seconds"
+</IfModule>

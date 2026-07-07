@@ -1,18 +1,25 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/context/AuthContext";
 import { AppDataProvider } from "@/context/AppDataContext";
-import Landing from "@/pages/Landing";
-import Login from "@/pages/Login";
-import Register from "@/pages/Register";
-import AppShell from "@/pages/AppShell";
-import MapView from "@/pages/MapView";
-import Feed from "@/pages/Feed";
-import PostDetail from "@/pages/PostDetail";
-import Report from "@/pages/Report";
-import Trajet from "@/pages/Trajet";
-import Profile from "@/pages/Profile";
 import "@/App.css";
+
+// Route-level code splitting: each page ships as its own chunk instead of
+// all of them (plus their dependencies — framer-motion, the map, ...) being
+// parsed/executed upfront in one bundle before the first page can render.
+// The Landing page in particular shouldn't have to pay for Report/Profile/
+// Feed's code just to show the marketing page.
+const Landing = lazy(() => import("@/pages/Landing"));
+const Login = lazy(() => import("@/pages/Login"));
+const Register = lazy(() => import("@/pages/Register"));
+const AppShell = lazy(() => import("@/pages/AppShell"));
+const MapView = lazy(() => import("@/pages/MapView"));
+const Feed = lazy(() => import("@/pages/Feed"));
+const PostDetail = lazy(() => import("@/pages/PostDetail"));
+const Report = lazy(() => import("@/pages/Report"));
+const Trajet = lazy(() => import("@/pages/Trajet"));
+const Profile = lazy(() => import("@/pages/Profile"));
 
 function App() {
   return (
@@ -20,20 +27,22 @@ function App() {
       <AuthProvider>
         <AppDataProvider>
           <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/app" element={<AppShell />}>
-                <Route index element={<MapView />} />
-                <Route path="carte" element={<MapView />} />
-                <Route path="feed" element={<Feed />} />
-                <Route path="feed/:id" element={<PostDetail />} />
-                <Route path="signaler" element={<Report />} />
-                <Route path="trajet" element={<Trajet />} />
-                <Route path="profil" element={<Profile />} />
-              </Route>
-            </Routes>
+            <Suspense fallback={null}>
+              <Routes>
+                <Route path="/" element={<Landing />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/app" element={<AppShell />}>
+                  <Route index element={<MapView />} />
+                  <Route path="carte" element={<MapView />} />
+                  <Route path="feed" element={<Feed />} />
+                  <Route path="feed/:id" element={<PostDetail />} />
+                  <Route path="signaler" element={<Report />} />
+                  <Route path="trajet" element={<Trajet />} />
+                  <Route path="profil" element={<Profile />} />
+                </Route>
+              </Routes>
+            </Suspense>
           </BrowserRouter>
           <Toaster position="top-center" richColors />
         </AppDataProvider>

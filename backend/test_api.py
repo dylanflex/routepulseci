@@ -116,23 +116,69 @@ def test_create_incident_then_lists(client):
     assert incident_id in [i["id"] for i in listed.json()]
 
 
-def test_confirm_incident_increments(client):
-    created = client.post(
-        "/api/incidents",
-        json={
-            "type": "accident",
-            "lat": 5.32,
-            "lng": -4.01,
-            "road": "Bd X",
-            "severity": "blocked",
-        },
-    )
-    incident_id = created.json()["id"]
-    before = created.json()["confirmed"]
+def _create_incident(client, **overrides):
+    payload = {
+        "type": "accident",
+        "lat": 5.32,
+        "lng": -4.01,
+        "road": "Bd X",
+        "severity": "blocked",
+        **overrides,
+    }
+    return client.post("/api/incidents", json=payload).json()
 
-    confirmed = client.post(f"/api/incidents/{incident_id}/confirm")
-    assert confirmed.status_code == 200
-    assert confirmed.json()["confirmed"] == before + 1
+
+def test_create_incident_starts_unconfirmed(client):
+    # A fresh report is a claim, not yet a validated fact — see server.py's
+    # IncidentORM.confirmed comment for why this must not default to 1.
+    created = _create_incident(client)
+    assert created["confirmed"] == 0
+    assert created["confirmed_by_me"] is False
+
+
+def test_confirm_incident_requires_auth(client):
+    incident = _create_incident(client)
+    res = client.post(f"/api/incidents/{incident['id']}/confirm")
+    assert res.status_code == 401
+
+
+def test_confirm_incident_is_idempotent_toggle(client):
+    headers, _, _ = register(client)
+    incident = _create_incident(client)
+    before = incident["confirmed"]
+
+    confirmed = client.post(
+        f"/api/incidents/{incident['id']}/confirm", headers=headers
+    ).json()
+    assert confirmed["confirmed"] == before + 1
+    assert confirmed["confirmed_by_me"] is True
+
+    # Same user again -> toggles off, no unlimited replay inflation.
+    again = client.post(
+        f"/api/incidents/{incident['id']}/confirm", headers=headers
+    ).json()
+    assert again["confirmed"] == before
+    assert again["confirmed_by_me"] is False
+
+
+def test_confirmed_by_me_is_per_user_for_incidents(client):
+    author, _, _ = register(client)
+    other, _, _ = register(client)
+    incident = _create_incident(client)
+    client.post(f"/api/incidents/{incident['id']}/confirm", headers=author)
+
+    as_author = next(
+        i
+        for i in client.get("/api/incidents", headers=author).json()
+        if i["id"] == incident["id"]
+    )
+    as_other = next(
+        i
+        for i in client.get("/api/incidents", headers=other).json()
+        if i["id"] == incident["id"]
+    )
+    assert as_author["confirmed_by_me"] is True
+    assert as_other["confirmed_by_me"] is False
 
 
 def test_invalid_incident_type_is_422(client):
@@ -271,6 +317,21 @@ def test_comment_bumps_count(client):
     assert refreshed["comments"] == post["comments"] + 1
 
 
+def test_comment_is_attributed_to_the_author_account(client):
+    # A comment must be traceable to a real account (moderation, not just a
+    # free-text display name) — see CommentORM.user_id.
+    headers, user, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    comment = client.post(
+        f"/api/posts/{post['id']}/comments", headers=headers, json={"text": "Bien vu"}
+    ).json()
+    assert comment["user_id"] == user["id"]
+
+
 def test_comment_requires_auth(client):
     headers, _, _ = register(client)
     post = client.post(
@@ -284,6 +345,50 @@ def test_comment_requires_auth(client):
         ).status_code
         == 401
     )
+
+
+# --- Community ranking (gamification) ------------------------------------
+
+
+def test_me_stats_requires_auth(client):
+    assert client.get("/api/me/stats").status_code == 401
+
+
+def test_me_stats_reflects_posts_and_tier(client):
+    headers, _, _ = register(client)
+
+    # Fresh account: no posts -> zero points, entry tier.
+    stats = client.get("/api/me/stats", headers=headers).json()
+    assert stats["points"] == 0
+    assert stats["tier"] == "Nouveau"
+    assert stats["next_tier"]["label"] == "Contributeur"
+
+    # One post, no confirmations yet (a fresh post starts unvalidated) = 5 pts.
+    client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    )
+    stats = client.get("/api/me/stats", headers=headers).json()
+    assert stats["posts"] == 1
+    assert stats["confirmations"] == 0
+    assert stats["points"] == 5
+    assert stats["next_tier"]["points_needed"] == 5
+
+
+def test_leaderboard_ranks_new_author(client):
+    headers, user, _ = register(client, display_name="Ranked User")
+    client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    )
+    board = client.get("/api/leaderboard", params={"limit": 50}).json()
+    mine = [e for e in board if e["handle"] == f"@{user['username']}"]
+    assert len(mine) == 1
+    assert mine[0]["posts"] == 1
+    assert mine[0]["points"] >= 5
+    assert "rank" in mine[0] and "tier" in mine[0]
 
 
 # --- Trip planner (geocode suggest + route scan) -------------------------

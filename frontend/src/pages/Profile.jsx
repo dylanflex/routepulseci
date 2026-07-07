@@ -1,17 +1,26 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { StatChip } from "@/components/routepulse/StatChip";
-import { MapPin, Bell, Settings, Shield, ChevronRight, ShieldCheck, LogOut } from "lucide-react";
+import { MapPin, Bell, Settings, Shield, ChevronRight, ShieldCheck, LogOut, Trophy, Sparkles } from "lucide-react";
 import { useAppData } from "@/context/AppDataContext";
 import { useAuth } from "@/context/AuthContext";
+import { api } from "@/lib/api";
 import { formatMonthYear } from "@/lib/time";
 import { AlertPost } from "@/components/routepulse/AlertPost";
 
 export default function Profile() {
-  const { posts } = useAppData();
+  const { posts, leaderboard } = useAppData();
   const { user, logout } = useAuth();
+
+  // Earned tier / points / distance to the next tier — the "level up" data.
+  const { data: myStats } = useQuery({
+    queryKey: ["me-stats", user?.username],
+    queryFn: api.myStats,
+    enabled: !!user,
+  });
 
   if (!user) {
     return (
@@ -72,11 +81,84 @@ export default function Profile() {
         </div>
       </div>
 
+      {/* Contribution tier + progress to the next level */}
+      {myStats && (
+        <div className="px-4 mt-4">
+          <div className="rounded-2xl bg-card border border-border p-4 shadow-soft">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-gradient-hero text-primary-foreground flex items-center justify-center shadow-glow">
+                <Trophy className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-display font-semibold text-sm flex items-center gap-1.5">
+                  {myStats.tier}
+                  {myStats.verified && <ShieldCheck className="w-3.5 h-3.5 text-primary" />}
+                </p>
+                <p className="text-xs text-muted-foreground">{myStats.points} points de contribution</p>
+              </div>
+            </div>
+            {myStats.next_tier ? (
+              <div className="mt-3">
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-hero transition-all"
+                    style={{ width: `${Math.min(100, Math.round((myStats.points / myStats.next_tier.at) * 100))}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  Encore <span className="font-semibold text-foreground">{myStats.next_tier.points_needed} pts</span> pour devenir <span className="font-semibold text-foreground">{myStats.next_tier.label}</span>
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-[11px] text-accent font-medium flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> Niveau maximum atteint — merci pour tes signalements !
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="px-4 mt-4 grid grid-cols-2 gap-2">
-        <StatChip label="Signalements" value={myPosts.length} icon={ShieldCheck} tone="primary" />
-        <StatChip label="Confirmations" value={confirmationsReceived} icon={ShieldCheck} tone="accent" />
+        <StatChip label="Signalements" value={myStats?.posts ?? myPosts.length} icon={ShieldCheck} tone="primary" />
+        <StatChip label="Confirmations" value={myStats?.confirmations ?? confirmationsReceived} icon={ShieldCheck} tone="accent" />
       </div>
+
+      {/* Community leaderboard */}
+      {leaderboard.length > 0 && (
+        <div className="px-4 mt-6">
+          <h2 className="font-display text-lg font-semibold flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-primary" /> Classement de la communauté
+          </h2>
+          <div className="mt-3 rounded-2xl bg-card border border-border overflow-hidden">
+            {leaderboard.map((entry) => {
+              const isMe = entry.handle === `@${user.username}`;
+              const medal = entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
+              return (
+                <div
+                  key={entry.handle}
+                  className={`flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0 ${isMe ? "bg-primary/5" : ""}`}
+                >
+                  <div className="w-6 text-center font-display font-semibold text-sm text-muted-foreground">
+                    {medal || entry.rank}
+                  </div>
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback className="bg-muted text-foreground text-xs font-semibold">{entry.avatar || entry.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+                      {entry.name}
+                      {isMe && <span className="text-[10px] font-medium text-primary">toi</span>}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{entry.tier}</p>
+                  </div>
+                  <span className="text-sm font-display font-semibold text-foreground">{entry.points}<span className="text-[10px] text-muted-foreground font-medium ml-0.5">pts</span></span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Settings list */}
       <div className="px-4 mt-6">

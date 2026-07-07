@@ -115,11 +115,15 @@ let webpackConfig = {
 
       // Parallel Terser minification spawns worker processes that have been
       // observed to crash with an access violation on memory-constrained
-      // Windows hosts once larger deps (e.g. maplibre-gl) are bundled in.
+      // Windows hosts once larger deps are bundled in. mapbox-gl v3 is large
+      // enough that even single-threaded minification exhausts memory ("Zone"
+      // OOM) on an 8 GB host — so we disable parallelism AND skip re-minifying
+      // mapbox-gl (its shipped dist is already compact).
       if (webpackConfig.optimization?.minimizer) {
         webpackConfig.optimization.minimizer.forEach((minimizer) => {
           if (minimizer.options && "parallel" in minimizer.options) {
             minimizer.options.parallel = false;
+            minimizer.options.exclude = /[\\/]node_modules[\\/]mapbox-gl[\\/]/;
           }
         });
       }

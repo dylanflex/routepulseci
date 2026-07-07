@@ -17,12 +17,16 @@ pure and deterministic — they carry the core value and are unit-tested.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import math
 import os
 from typing import List, Optional, Tuple
 
 import httpx
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load backend/.env before reading keys: server.py imports this module before
 # its own load_dotenv runs, so we can't rely on the caller having loaded it.
@@ -69,6 +73,20 @@ ABIDJAN_GAZETTEER = {
     "palmeraie": (5.3700, -3.9600),
 }
 ABIDJAN_CENTER = (5.3600, -4.0083)
+
+# RoutePulse is Abidjan-only. Bias geocoding toward the city and reject any hit
+# outside Côte d'Ivoire — otherwise a generic name ("Plateau", "Marcory")
+# matches a namesake abroad (GraphHopper ranks Benin's Plateau first for
+# "Plateau"), producing an intercontinental route on which no citizen incident
+# sits and no deviation can ever be proposed.
+GEOCODE_BIAS_POINT = f"{ABIDJAN_CENTER[0]},{ABIDJAN_CENTER[1]}"
+# (lat_min, lat_max, lng_min, lng_max) — a generous box around Côte d'Ivoire.
+CI_BOUNDS = (4.0, 11.0, -8.8, -2.4)
+
+
+def in_ci_bounds(lat: float, lng: float) -> bool:
+    lat_min, lat_max, lng_min, lng_max = CI_BOUNDS
+    return lat_min <= lat <= lat_max and lng_min <= lng <= lng_max
 
 
 # --- Geometry ------------------------------------------------------------
@@ -167,17 +185,31 @@ async def geocode(query: str, client: httpx.AsyncClient) -> dict:
         try:
             r = await client.get(
                 f"{GRAPHHOPPER_BASE}/geocode",
-                params={"q": query, "locale": "fr", "limit": 1, "key": GRAPHHOPPER_KEY},
+                params={
+                    "q": query,
+                    "locale": "fr",
+                    "limit": 5,
+                    "point": GEOCODE_BIAS_POINT,
+                    "location_bias_scale": 100,
+                    "key": GRAPHHOPPER_KEY,
+                },
                 timeout=8.0,
             )
             r.raise_for_status()
             hits = r.json().get("hits") or []
-            if hits:
-                pt = hits[0]["point"]
-                name = hits[0].get("name") or query
-                return {"name": name or query, "lat": pt["lat"], "lng": pt["lng"]}
-        except (httpx.HTTPError, KeyError, ValueError):
-            pass  # fall through to the gazetteer
+            # First hit inside Côte d'Ivoire (bias may still rank a namesake first).
+            for hit in hits:
+                pt = hit.get("point") or {}
+                if "lat" in pt and "lng" in pt and in_ci_bounds(pt["lat"], pt["lng"]):
+                    return {
+                        "name": hit.get("name") or query,
+                        "lat": pt["lat"],
+                        "lng": pt["lng"],
+                    }
+            # No Ivorian match — fall through to the local gazetteer below.
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
+            logger.warning("GraphHopper geocode failed for %r: %s", query, exc)
+            # fall through to the gazetteer
 
     lowered = query.lower()
     for key, (lat, lng) in ABIDJAN_GAZETTEER.items():
@@ -205,14 +237,23 @@ async def suggest(query: str, client: httpx.AsyncClient) -> List[dict]:
         try:
             r = await client.get(
                 f"{GRAPHHOPPER_BASE}/geocode",
-                params={"q": query, "locale": "fr", "limit": 6, "key": GRAPHHOPPER_KEY},
+                params={
+                    "q": query,
+                    "locale": "fr",
+                    "limit": 10,
+                    "point": GEOCODE_BIAS_POINT,
+                    "location_bias_scale": 100,
+                    "key": GRAPHHOPPER_KEY,
+                },
                 timeout=8.0,
             )
             r.raise_for_status()
             out = []
             for hit in r.json().get("hits") or []:
                 pt = hit.get("point") or {}
-                if "lat" in pt and "lng" in pt:
+                # Keep only Ivorian candidates so the autocomplete never offers
+                # a foreign namesake the router can't reach.
+                if "lat" in pt and "lng" in pt and in_ci_bounds(pt["lat"], pt["lng"]):
                     out.append(
                         {
                             "name": _hit_label(hit) or query,
@@ -221,9 +262,10 @@ async def suggest(query: str, client: httpx.AsyncClient) -> List[dict]:
                         }
                     )
             if out:
-                return out
-        except (httpx.HTTPError, KeyError, ValueError):
-            pass  # fall through to the gazetteer
+                return out[:6]
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
+            logger.warning("GraphHopper suggest failed for %r: %s", query, exc)
+            # fall through to the gazetteer
 
     lowered = query.lower()
     matches = [
@@ -275,15 +317,20 @@ async def _graphhopper_route(
             "distance_m": p["distance"],
             "duration_min": p["time"] / 60000.0,
         }
-    except (httpx.HTTPError, KeyError, ValueError):
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        logger.warning("GraphHopper route failed: %s", exc)
         return None
 
 
-def _detour_waypoints(
-    a: dict, b: dict, obstacle: dict, offset_m: float = 700.0
-) -> List[dict]:
-    """Two candidate via-points, offset perpendicular to the a→b line on either
-    side of the obstacle, to push a standard route around it."""
+# Perpendicular offsets (metres) tried on each side of the obstacle. A single
+# small nudge often snaps straight back onto the blocked road; wider offsets
+# force the router onto a genuinely different corridor.
+DETOUR_OFFSETS_M = (900.0, 1800.0, 3000.0)
+
+
+def _detour_waypoints(a: dict, b: dict, obstacle: dict) -> List[dict]:
+    """Candidate via-points offset perpendicular to the a→b line, on both sides
+    of the obstacle and across several distances (DETOUR_OFFSETS_M)."""
     lat0 = obstacle["lat"]
     mpd_lat = 111320.0
     mpd_lng = 111320.0 * math.cos(math.radians(lat0)) or 1e-9
@@ -292,13 +339,14 @@ def _detour_waypoints(
     norm = math.hypot(d_east, d_north) or 1e-9
     pe, pn = -d_north / norm, d_east / norm  # perpendicular unit vector
     vias = []
-    for sign in (1.0, -1.0):
-        vias.append(
-            {
-                "lat": obstacle["lat"] + sign * pn * offset_m / mpd_lat,
-                "lng": obstacle["lng"] + sign * pe * offset_m / mpd_lng,
-            }
-        )
+    for offset_m in DETOUR_OFFSETS_M:
+        for sign in (1.0, -1.0):
+            vias.append(
+                {
+                    "lat": obstacle["lat"] + sign * pn * offset_m / mpd_lat,
+                    "lng": obstacle["lng"] + sign * pe * offset_m / mpd_lng,
+                }
+            )
     return vias
 
 
@@ -330,10 +378,19 @@ async def compute_reroute(
         return None
 
     obstacle = severe[0]  # first severe incident along the route
+    baseline_dist = baseline.get("distance_m") or 0.0
+    vias = _detour_waypoints(a, b, obstacle)
+    # Evaluate all detour candidates concurrently rather than serially — the
+    # wider search would otherwise stack several round trips onto every scan.
+    alts = await asyncio.gather(
+        *(_graphhopper_route([a, via, b], client) for via in vias)
+    )
     best = None  # (severe_remaining, duration_min, alt)
-    for via in _detour_waypoints(a, b, obstacle):
-        alt = await _graphhopper_route([a, via, b], client)
+    for alt in alts:
         if not alt or len(alt["route"]) < 2:
+            continue
+        # Reject an absurd detour (a via-point snapped onto a distant road).
+        if baseline_dist and alt["distance_m"] > 3.0 * baseline_dist:
             continue
         remaining = _count_severe_on_route(alt["route"], severe)
         key = (remaining, alt["duration_min"])
@@ -390,23 +447,33 @@ async def road_segment_for_incident(
     return straight
 
 
+async def _resolve_segment(inc, client: httpx.AsyncClient) -> List[List[float]]:
+    coords = _ROAD_SEGMENT_CACHE.get(inc.id)
+    if coords is None:
+        coords = await road_segment_for_incident(inc, client)
+        _ROAD_SEGMENT_CACHE[inc.id] = coords
+    return coords
+
+
 async def road_conditions(incidents, client: httpx.AsyncClient) -> List[dict]:
-    """One coloured road stretch per incident: {incident_id, road, level, coords}."""
-    out = []
-    for inc in incidents:
-        coords = _ROAD_SEGMENT_CACHE.get(inc.id)
-        if coords is None:
-            coords = await road_segment_for_incident(inc, client)
-            _ROAD_SEGMENT_CACHE[inc.id] = coords
-        out.append(
-            {
-                "incident_id": inc.id,
-                "road": inc.road,
-                "level": inc.severity,
-                "coords": coords,
-            }
-        )
-    return out
+    """One coloured road stretch per incident: {incident_id, road, level, coords}.
+
+    Cache misses hit GraphHopper, so resolve them concurrently — this endpoint
+    is polled with the live map and a sequential loop over N incidents would
+    stack N round trips on the first (cold-cache) load.
+    """
+    segments = await asyncio.gather(
+        *(_resolve_segment(inc, client) for inc in incidents)
+    )
+    return [
+        {
+            "incident_id": inc.id,
+            "road": inc.road,
+            "level": inc.severity,
+            "coords": coords,
+        }
+        for inc, coords in zip(incidents, segments)
+    ]
 
 
 # --- Correlation ---------------------------------------------------------
