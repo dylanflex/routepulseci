@@ -93,6 +93,9 @@ class IncidentORM(Base):
     lng: Mapped[float] = mapped_column(Float, nullable=False)
     road: Mapped[str] = mapped_column(String, nullable=False)
     severity: Mapped[str] = mapped_column(String, nullable=False)
+    # Comma-joined TransportMode values (e.g. "gbaka,voiture") -- which
+    # mode(s) of transport this report affects. See TransportMode.
+    transport_modes: Mapped[str] = mapped_column(String, default="voiture")
     # Starts at 0: an incident is a claim, not a fact, until someone else
     # backs it up. Starting at 1 would let every fresh report masquerade as
     # already community-validated, which is exactly the trust signal the
@@ -120,6 +123,8 @@ class PostORM(Base):
     location: Mapped[str] = mapped_column(String, nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)
     severity: Mapped[str] = mapped_column(String, nullable=False)
+    # See IncidentORM.transport_modes.
+    transport_modes: Mapped[str] = mapped_column(String, default="voiture")
     text: Mapped[str] = mapped_column(String, nullable=False)
     image: Mapped[str | None] = mapped_column(String, nullable=True)
     likes: Mapped[int] = mapped_column(Integer, default=0)
@@ -308,6 +313,21 @@ async def get_current_user_optional(
     return await session.get(UserORM, payload["sub"])
 
 
+# Heuristic demo-data distribution: which modes of transport a given incident
+# type typically affects (a jam or flood blocks shared taxis/minibuses just
+# as much as private cars; a pothole mostly bites motos/cars). seed_data.py's
+# tuples predate TransportMode and aren't restructured just to carry it
+# explicitly, so this fills the gap for demo purposes only.
+_TRANSPORT_MODES_BY_TYPE: dict[str, str] = {
+    "jam": "voiture,gbaka,woro_woro",
+    "accident": "voiture,gbaka,woro_woro",
+    "works": "voiture,gbaka,woro_woro,moto",
+    "police": "voiture,gbaka,woro_woro",
+    "flood": "voiture,gbaka,woro_woro,pied",
+    "degraded": "voiture,moto",
+}
+
+
 async def seed_dataset(session: AsyncSession):
     """Populate the DB with the full demo dataset (see seed_data.py).
 
@@ -348,6 +368,7 @@ async def seed_dataset(session: AsyncSession):
                 road=road,
                 severity=severity,
                 confirmed=confirmed,
+                transport_modes=_TRANSPORT_MODES_BY_TYPE.get(itype, "voiture"),
                 created_at=now - timedelta(minutes=age),
             )
             for (itype, lat, lng, road, severity, confirmed, age) in seed_data.INCIDENTS
@@ -372,6 +393,7 @@ async def seed_dataset(session: AsyncSession):
             location=location,
             type=ptype,
             severity=severity,
+            transport_modes=_TRANSPORT_MODES_BY_TYPE.get(ptype, "voiture"),
             text=text,
             image=image,
             likes=likes,
@@ -524,12 +546,33 @@ class Severity(str, Enum):
     danger = "danger"
 
 
+class TransportMode(str, Enum):
+    # Most Abidjanais get around by shared/informal transit, not private
+    # cars -- letting a report say which mode(s) it affects (a jam affects
+    # cars *and* gbaka since they share the road; a flood may not stop a
+    # moto) is what makes this app relevant to them too, not just drivers.
+    voiture = "voiture"
+    gbaka = "gbaka"
+    woro_woro = "woro_woro"
+    moto = "moto"
+    pied = "pied"
+
+
+def _transport_modes_to_str(modes: List[TransportMode]) -> str:
+    return ",".join(m.value for m in modes) or TransportMode.voiture.value
+
+
+def _transport_modes_from_str(raw: str) -> list[str]:
+    return raw.split(",") if raw else [TransportMode.voiture.value]
+
+
 class IncidentCreate(BaseModel):
     type: IncidentType
     lat: float
     lng: float
     road: str
     severity: Severity
+    transport_modes: List[TransportMode] = [TransportMode.voiture]
 
 
 class IncidentOut(BaseModel):
@@ -539,6 +582,7 @@ class IncidentOut(BaseModel):
     lng: float
     road: str
     severity: str
+    transport_modes: List[str]
     confirmed: int
     confirmed_by_me: bool
     created_at: datetime
@@ -558,6 +602,7 @@ class PostCreate(BaseModel):
     severity: Severity
     text: str
     image: str | None = None
+    transport_modes: List[TransportMode] = [TransportMode.voiture]
 
 
 class PostOut(BaseModel):
@@ -568,6 +613,7 @@ class PostOut(BaseModel):
     severity: str
     text: str
     image: str | None
+    transport_modes: List[str]
     likes: int
     comments: int
     shares: int
@@ -663,6 +709,7 @@ def serialize_post(
         "location": p.location,
         "type": p.type,
         "severity": p.severity,
+        "transport_modes": _transport_modes_from_str(p.transport_modes),
         "text": p.text,
         "image": p.image,
         "likes": p.likes,
@@ -744,6 +791,7 @@ def serialize_incident(inc: IncidentORM, confirmed_ids: Collection[str] = ()) ->
         "lng": inc.lng,
         "road": inc.road,
         "severity": inc.severity,
+        "transport_modes": _transport_modes_from_str(inc.transport_modes),
         "confirmed": inc.confirmed,
         "confirmed_by_me": inc.id in confirmed_ids,
         "created_at": inc.created_at,
@@ -1001,7 +1049,10 @@ async def create_incident(
 ):
     # Reporting stays anonymous by product choice (no account needed to warn
     # others). Confirming, below, is the trust signal and is not anonymous.
-    incident = IncidentORM(**payload.model_dump())
+    data = payload.model_dump(exclude={"transport_modes"})
+    incident = IncidentORM(
+        **data, transport_modes=_transport_modes_to_str(payload.transport_modes)
+    )
     session.add(incident)
     await session.commit()
     await session.refresh(incident)
@@ -1153,7 +1204,12 @@ async def create_post(
     current_user: UserORM = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = PostORM(author_id=current_user.id, **payload.model_dump())
+    data = payload.model_dump(exclude={"transport_modes"})
+    post = PostORM(
+        author_id=current_user.id,
+        **data,
+        transport_modes=_transport_modes_to_str(payload.transport_modes),
+    )
     session.add(post)
     await session.commit()
     await session.refresh(post)

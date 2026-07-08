@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { TrafficMap } from "@/components/routepulse/LazyTrafficMap";
 import { TrafficLegend } from "@/components/routepulse/TrafficLegend";
-import { INCIDENT_TYPES } from "@/lib/mockData";
+import { INCIDENT_TYPES, TRANSPORT_MODES } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar, estimateDelayMin } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
@@ -181,6 +181,16 @@ export default function MapView() {
                 <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
                   Les utilisateurs à proximité rapportent une {meta.label.toLowerCase()} confirmée. Une déviation par la voie parallèle est conseillée. Rejoins la discussion dans le fil.
                 </p>
+                {selected.transport_modes?.length > 0 && (
+                  <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-muted-foreground">Concerne :</span>
+                    {selected.transport_modes.map((m) => (
+                      <span key={m} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs font-medium">
+                        {TRANSPORT_MODES[m]?.emoji} {TRANSPORT_MODES[m]?.label || m}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-5 flex gap-2">
                   <Button
                     className={`flex-1 rounded-xl ${selected.confirmed_by_me ? "bg-accent text-accent-foreground" : "bg-foreground text-background"}`}

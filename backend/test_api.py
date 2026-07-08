@@ -153,6 +153,30 @@ def test_create_incident_starts_unconfirmed(client):
     assert created["confirmed_by_me"] is False
 
 
+def test_incident_transport_modes_default_to_voiture(client):
+    created = _create_incident(client)
+    assert created["transport_modes"] == ["voiture"]
+
+
+def test_incident_transport_modes_can_be_multiple(client):
+    payload = {
+        "type": "flood",
+        "lat": 5.32,
+        "lng": -4.01,
+        "road": "Bd X",
+        "severity": "danger",
+        "transport_modes": ["gbaka", "woro_woro", "pied"],
+    }
+    created = client.post("/api/incidents", json=payload).json()
+    assert created["transport_modes"] == ["gbaka", "woro_woro", "pied"]
+
+    # Round-trips correctly through GET too, not just the create response.
+    fetched = next(
+        i for i in client.get("/api/incidents").json() if i["id"] == created["id"]
+    )
+    assert fetched["transport_modes"] == ["gbaka", "woro_woro", "pied"]
+
+
 def test_confirm_incident_requires_auth(client):
     incident = _create_incident(client)
     res = client.post(f"/api/incidents/{incident['id']}/confirm")
@@ -301,6 +325,29 @@ def test_create_and_list_post(client):
 
     listed = client.get("/api/posts")
     assert post["id"] in [p["id"] for p in listed.json()]
+
+
+def test_post_transport_modes_default_and_custom(client):
+    headers, _, _ = register(client)
+    default_post = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    assert default_post["transport_modes"] == ["voiture"]
+
+    custom_post = client.post(
+        "/api/posts",
+        headers=headers,
+        json={
+            "location": "L",
+            "type": "jam",
+            "severity": "dense",
+            "text": "x",
+            "transport_modes": ["gbaka", "moto"],
+        },
+    ).json()
+    assert custom_post["transport_modes"] == ["gbaka", "moto"]
 
 
 def test_like_requires_auth(client):

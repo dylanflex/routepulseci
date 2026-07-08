@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Heart, MessageCircle, Share2, Flag, ShieldCheck, MapPin, MoreHorizontal, Bookmark } from "lucide-react";
-import { INCIDENT_TYPES, TRAFFIC_LEVELS } from "@/lib/mockData";
+import { INCIDENT_TYPES, TRAFFIC_LEVELS, TRANSPORT_MODES } from "@/lib/mockData";
 import { trafficColorVar } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
@@ -128,6 +128,17 @@ export const AlertPost = ({ post, compact = false }) => {
 
       {/* Text */}
       <p className="px-4 text-[15px] leading-relaxed text-foreground">{post.text}</p>
+
+      {/* Who's affected — most Abidjanais move by gbaka/wôrô-wôrô, not just car */}
+      {post.transport_modes?.length > 0 && (
+        <div className="flex items-center gap-1 px-4 mt-1.5" title="Modes de transport concernés">
+          {post.transport_modes.map((m) => (
+            <span key={m} className="text-xs" title={TRANSPORT_MODES[m]?.label || m}>
+              {TRANSPORT_MODES[m]?.emoji || "❓"}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Image */}
       {post.image && !compact && (

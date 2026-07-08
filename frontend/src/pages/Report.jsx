@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { INCIDENT_TYPES, TRAFFIC_LEVELS } from "@/lib/mockData";
+import { INCIDENT_TYPES, TRAFFIC_LEVELS, TRANSPORT_MODES } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
 import { Camera, MapPin, Zap, Sparkles, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ export default function Report() {
   const [step, setStep] = useState(1);
   const [type, setType] = useState(null);
   const [severity, setSeverity] = useState("dense");
+  const [transportModes, setTransportModes] = useState(["voiture"]);
   const [note, setNote] = useState("");
   const [postToFeed, setPostToFeed] = useState(true);
   const [image, setImage] = useState(null);
@@ -43,11 +44,21 @@ export default function Report() {
     reader.readAsDataURL(file);
   };
 
+  const toggleTransportMode = (key) => {
+    setTransportModes((prev) => {
+      if (prev.includes(key)) {
+        // Always keep at least one mode selected.
+        return prev.length > 1 ? prev.filter((m) => m !== key) : prev;
+      }
+      return [...prev, key];
+    });
+  };
+
   const submit = async () => {
     setSending(true);
     try {
       // Only feed posts carry an image (incidents have no image field).
-      await submitReport({ type, severity, note, postToFeed: canPostToFeed, image: canPostToFeed ? image : null });
+      await submitReport({ type, severity, note, postToFeed: canPostToFeed, image: canPostToFeed ? image : null, transportModes });
       setSent(true);
       toast.success("Alerte envoyée ⚡", { description: "Merci, ta ville te remercie !" });
       setTimeout(() => navigate(canPostToFeed ? "/app/feed" : "/app/carte"), 1600);
@@ -160,7 +171,27 @@ export default function Report() {
           </motion.div>
         ) : (
           <motion.div key="s3" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}>
-            <p className="mt-6 text-sm font-medium">3. Ajoute une note (optionnel)</p>
+            <p className="mt-6 text-sm font-medium">Qui est concerné ?</p>
+            <p className="text-[11px] text-muted-foreground">La plupart des Abidjanais se déplacent en gbaka ou wôrô-wôrô — pas seulement en voiture.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {Object.entries(TRANSPORT_MODES).map(([key, meta]) => {
+                const active = transportModes.includes(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => toggleTransportMode(key)}
+                    className={`px-3 py-1.5 rounded-full border text-xs font-medium flex items-center gap-1.5 transition-all ${
+                      active ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:border-foreground/30"
+                    }`}
+                  >
+                    <span>{meta.emoji}</span> {meta.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-5 text-sm font-medium">3. Ajoute une note (optionnel)</p>
             <Textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}

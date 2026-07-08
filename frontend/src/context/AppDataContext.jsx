@@ -98,15 +98,16 @@ function AppData({ children }) {
   const reportPostMutation = useMutation({ mutationFn: (postId) => api.reportPost(postId) });
 
   const submitReportMutation = useMutation({
-    mutationFn: async ({ type, severity, note, postToFeed, image }) => {
+    mutationFn: async ({ type, severity, note, postToFeed, image, transportModes }) => {
       const { lat, lng } = await getCurrentPosition();
-      const incident = await api.createIncident({ type, lat, lng, road: "Position actuelle", severity });
+      const incident = await api.createIncident({ type, lat, lng, road: "Position actuelle", severity, transport_modes: transportModes });
       let post = null;
       if (postToFeed) {
         post = await api.createPost({
           location: "Votre position",
           type,
           severity,
+          transport_modes: transportModes,
           text: note || "Nouvelle alerte signalée.",
           image: image || null,
         });

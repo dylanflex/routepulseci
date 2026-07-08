@@ -17,4 +17,15 @@ export const TRAFFIC_LEVELS = {
   danger: { label: "Danger", color: "traffic-danger", hex: "#a855c9" },
 };
 
+// Most Abidjanais get around by shared/informal transit, not private cars —
+// tagging which modes a report affects is what makes this app relevant to
+// them too, not just car owners (see server.py's TRANSPORT_MODES).
+export const TRANSPORT_MODES = {
+  voiture: { label: "Voiture", emoji: "🚗" },
+  gbaka: { label: "Gbaka", emoji: "🚐" },
+  woro_woro: { label: "Wôrô-wôrô", emoji: "🚕" },
+  moto: { label: "Moto", emoji: "🏍️" },
+  pied: { label: "À pied", emoji: "🚶" },
+};
+
 export const ABIDJAN_CENTER = [-4.0083, 5.3600];

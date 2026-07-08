@@ -152,6 +152,22 @@ test("Report renders the first step", () => {
   expect(screen.getByText("Signaler un incident")).toBeInTheDocument();
 });
 
+test("Report lets a user tag which transport modes are affected", async () => {
+  renderAt("/signaler", <Route path="/signaler" element={<Report />} />);
+  fireEvent.click(screen.getByText("Embouteillage"));
+  fireEvent.click(screen.getByText("Continuer"));
+  fireEvent.click(await screen.findByText("Dense"));
+  fireEvent.click(screen.getByText("Continuer"));
+
+  // Voiture is selected by default; toggling Gbaka on adds it without
+  // deselecting Voiture (a jam affects both since they share the road).
+  const gbakaChip = (await screen.findByText("Gbaka")).closest("button");
+  expect(gbakaChip).not.toHaveClass("border-primary");
+  fireEvent.click(gbakaChip);
+  expect(gbakaChip).toHaveClass("border-primary");
+  expect(screen.getByText("Voiture").closest("button")).toHaveClass("border-primary");
+});
+
 test("Trajet renders the search form", () => {
   renderAt("/trajet", <Route path="/trajet" element={<Trajet />} />);
   expect(screen.getByText("Avant de partir")).toBeInTheDocument();
