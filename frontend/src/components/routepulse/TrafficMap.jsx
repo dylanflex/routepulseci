@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
-import { Maximize2, Minimize2, Search, LocateFixed, X, Sparkles } from "lucide-react";
+import { Maximize2, Minimize2, Search, LocateFixed, X, Sparkles, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PlaceField } from "@/components/routepulse/PlaceField";
 import { VoiceToggle } from "@/components/routepulse/VoiceToggle";
@@ -506,6 +506,12 @@ export const TrafficMap = ({
                     )}
                   </p>
                   <p className="text-[11px] text-muted-foreground line-clamp-2">{plannerReco.message}</p>
+                  {scanResult?.historical_risk_zones?.length > 0 && (
+                    <p className="text-[10px] font-medium text-warning flex items-center gap-1 mt-0.5">
+                      <History className="w-3 h-3 flex-shrink-0" />
+                      {scanResult.historical_risk_zones.length} zone{scanResult.historical_risk_zones.length > 1 ? "s" : ""} à risque historique sur ce trajet
+                    </p>
+                  )}
                 </div>
                 <VoiceToggle />
                 <button

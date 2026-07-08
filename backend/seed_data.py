@@ -47,6 +47,13 @@ USERS = [
 # (type, lat, lng, road, severity, confirmed, age_minutes)
 # Types: degraded | accident | jam | flood | police | works
 # Severity: fluid | dense | blocked | danger
+#
+# The entries with ages in the thousands of minutes below are deliberately
+# past their type's TTL (server.INCIDENT_TTL_MINUTES) — they're gone from the
+# live map, but still count toward server.risk_zones' historical aggregation
+# (same (road, type) pair recurring ≥3 times). Without at least one seeded
+# example per pattern, "zones à risque récurrent" would demo empty on a fresh
+# reseed even though the feature works.
 INCIDENTS = [
     # --- Cocody / Riviera / Angré ---
     ("jam", 5.3720, -3.9820, "Bd Latrille", "blocked", 24, 6),
@@ -63,9 +70,17 @@ INCIDENTS = [
     ("works", 5.3290, -4.0170, "Av. Chardy", "dense", 5, 63),
     ("police", 5.3210, -4.0240, "Pont Général de Gaulle", "fluid", 3, 26),
     ("flood", 5.3230, -4.0130, "Bd Lagunaire", "danger", 34, 15),
+    # Recurring flood history for the same stretch — Bd Lagunaire backs up
+    # against the lagoon every time it rains hard (see comment above).
+    ("flood", 5.3230, -4.0130, "Bd Lagunaire", "danger", 19, 2940),
+    ("flood", 5.3230, -4.0130, "Bd Lagunaire", "blocked", 12, 6420),
+    ("flood", 5.3230, -4.0130, "Bd Lagunaire", "danger", 27, 11500),
     # --- Adjamé ---
     ("jam", 5.3560, -4.0210, "Carrefour Liberté", "blocked", 31, 5),
     ("degraded", 5.3600, -4.0180, "Bd Nangui Abrogoua", "dense", 11, 38),
+    # Recurring pothole history for the same stretch — see comment above.
+    ("degraded", 5.3600, -4.0180, "Bd Nangui Abrogoua", "dense", 7, 4200),
+    ("degraded", 5.3600, -4.0180, "Bd Nangui Abrogoua", "blocked", 5, 8900),
     ("works", 5.3520, -4.0250, "Gare Adjamé", "blocked", 14, 72),
     # --- Yopougon ---
     ("degraded", 5.3450, -4.0750, "Yop, Bd Principal", "dense", 16, 22),

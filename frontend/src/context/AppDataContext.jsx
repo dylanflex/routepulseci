@@ -59,6 +59,9 @@ function AppData({ children }) {
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   });
+  // Recurring incident patterns per road (see server.compute_risk_zones) --
+  // history-based, so it changes far less often than live incidents/roads.
+  const riskZonesQuery = useQuery({ queryKey: ["risk-zones"], queryFn: api.riskZones });
 
   const patchPost = useCallback(
     (updated) => qc.setQueryData(["posts"], (prev = []) => prev.map((p) => (p.id === updated.id ? updated : p))),
@@ -142,6 +145,7 @@ function AppData({ children }) {
     posts: postsQuery.data ?? [],
     incidents: incidentsQuery.data ?? [],
     roadConditions: roadConditionsQuery.data ?? [],
+    riskZones: riskZonesQuery.data ?? [],
     stats: statsQuery.data ?? null,
     leaderboard: leaderboardQuery.data ?? [],
     incidentsUpdatedAt: incidentsQuery.dataUpdatedAt,

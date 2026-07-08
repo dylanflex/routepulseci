@@ -1,11 +1,12 @@
 import logging
 import os
 import uuid
+from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Collection, List
+from typing import Any, Collection, List
 
 import bcrypt
 import httpx
@@ -505,6 +506,16 @@ INCIDENT_TTL_MINUTES: dict[str, int] = {
 }
 DEFAULT_INCIDENT_TTL_MINUTES = 180
 
+# A road with this many historical reports of the same incident type — active
+# or long expired — is flagged as a recurring risk zone (e.g. "this stretch
+# floods every rainy season"). This is the one thing a single live incident
+# can never show: a pattern only visible across time, which is exactly what
+# generic map apps operating in Abidjan don't track. Grouping is by exact
+# road-name string (as self-reported, not geocoded), so near-duplicate
+# spellings of the same real stretch won't merge — acceptable for the
+# free-text reporting flow this app has today.
+RISK_ZONE_MIN_OCCURRENCES = 3
+
 
 class Severity(str, Enum):
     fluid = "fluid"
@@ -692,6 +703,37 @@ def is_incident_active(incident: IncidentORM, now: datetime | None = None) -> bo
         created_at = created_at.replace(tzinfo=timezone.utc)
     ttl = INCIDENT_TTL_MINUTES.get(incident.type, DEFAULT_INCIDENT_TTL_MINUTES)
     return created_at + timedelta(minutes=ttl) > now
+
+
+def compute_risk_zones(incidents: Collection[IncidentORM]) -> list[dict]:
+    """Roads with >= RISK_ZONE_MIN_OCCURRENCES historical reports of the same
+    incident type — active or long expired. Built from the *full* history
+    (is_incident_active is deliberately not applied here), since the whole
+    point is surfacing a pattern that outlives any single incident's TTL."""
+    groups: dict[tuple[str, str], list[IncidentORM]] = {}
+    for inc in incidents:
+        groups.setdefault((inc.road, inc.type), []).append(inc)
+
+    zones: list[dict[str, Any]] = []
+    for (road, itype), group in groups.items():
+        if len(group) < RISK_ZONE_MIN_OCCURRENCES:
+            continue
+        latest = max(group, key=lambda i: i.created_at)
+        zones.append(
+            {
+                "road": road,
+                "type": itype,
+                "occurrences": len(group),
+                "typical_severity": Counter(i.severity for i in group).most_common(1)[
+                    0
+                ][0],
+                "last_reported": latest.created_at,
+                "lat": latest.lat,
+                "lng": latest.lng,
+            }
+        )
+    zones.sort(key=lambda z: z["occurrences"], reverse=True)
+    return zones
 
 
 def serialize_incident(inc: IncidentORM, confirmed_ids: Collection[str] = ()) -> dict:
@@ -1004,6 +1046,15 @@ async def road_conditions(session: AsyncSession = Depends(get_session)):
         return await routing.road_conditions(incidents, client)
 
 
+@api_router.get("/risk-zones")
+async def risk_zones(session: AsyncSession = Depends(get_session)):
+    """Recurring incident patterns per road (see compute_risk_zones) — e.g.
+    "this stretch floods every rainy season" — built from the full incident
+    history, not just what's currently active on the live map."""
+    result = await session.execute(select(IncidentORM))
+    return compute_risk_zones(result.scalars().all())
+
+
 # --- Route scan ("avant de partir") --------------------------------------
 
 
@@ -1024,10 +1075,22 @@ async def scan_route(
         base = await routing.compute_route(origin, dest, client)
 
         result = await session.execute(select(IncidentORM))
-        incidents = [i for i in result.scalars().all() if is_incident_active(i)]
+        all_incidents = result.scalars().all()
+        incidents = [i for i in all_incidents if is_incident_active(i)]
         alerts = routing.incidents_on_route(
             incidents, base["route"], base["distance_m"]
         )
+
+        # Historical patterns (see compute_risk_zones) don't need a currently
+        # active incident to matter — a road that floods every rainy season
+        # is worth warning about even between rains, which no single live
+        # incident could ever convey.
+        historical_risk_zones = [
+            zone
+            for zone in compute_risk_zones(all_incidents)
+            if routing.distance_to_route_m(zone["lat"], zone["lng"], base["route"])
+            <= routing.CORRIDOR_BUFFER_M
+        ]
 
         severe = [a for a in alerts if a["severity"] in routing.SEVERE_SEVERITIES]
         reroute = await routing.compute_reroute(origin, dest, severe, base, client)
@@ -1055,6 +1118,7 @@ async def scan_route(
         "severe_count": len(severe),
         "reroute": reroute,
         "recommendation": recommendation,
+        "historical_risk_zones": historical_risk_zones,
     }
 
 

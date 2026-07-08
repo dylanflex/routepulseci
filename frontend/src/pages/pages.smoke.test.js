@@ -26,6 +26,7 @@ jest.mock("@/lib/api", () => {
       me: jest.fn(),
       listIncidents: jest.fn(),
       roadConditions: jest.fn(),
+      riskZones: jest.fn(),
       createIncident: jest.fn(),
       confirmIncident: jest.fn(),
       listPosts: jest.fn(),
@@ -53,6 +54,7 @@ beforeEach(() => {
 
   api.listIncidents.mockResolvedValue(incidents);
   api.roadConditions.mockResolvedValue([]);
+  api.riskZones.mockResolvedValue([]);
   api.createIncident.mockResolvedValue(incidents[0]);
   api.confirmIncident.mockResolvedValue(incidents[0]);
   api.listPosts.mockResolvedValue(posts);
@@ -65,7 +67,7 @@ beforeEach(() => {
   api.login.mockResolvedValue({ access_token: "t", user: fakeUser });
   api.register.mockResolvedValue({ access_token: "t", user: fakeUser });
   api.suggestPlaces.mockResolvedValue([]);
-  api.scanRoute.mockResolvedValue({ from: {}, to: {}, distance_km: 1, duration_min: 1, route: [], alerts: [], severe_count: 0, reroute: null, recommendation: null });
+  api.scanRoute.mockResolvedValue({ from: {}, to: {}, distance_km: 1, duration_min: 1, route: [], alerts: [], severe_count: 0, reroute: null, recommendation: null, historical_risk_zones: [] });
 });
 
 const renderAt = (path, route) =>
@@ -153,6 +155,24 @@ test("Report renders the first step", () => {
 test("Trajet renders the search form", () => {
   renderAt("/trajet", <Route path="/trajet" element={<Trajet />} />);
   expect(screen.getByText("Avant de partir")).toBeInTheDocument();
+});
+
+test("Trajet surfaces historical risk zones from a scan", async () => {
+  api.scanRoute.mockResolvedValueOnce({
+    from: {}, to: {}, distance_km: 5, duration_min: 12, route: [], alerts: [],
+    severe_count: 0, reroute: null, recommendation: null,
+    historical_risk_zones: [
+      { road: "Bd Lagunaire", type: "flood", occurrences: 4, typical_severity: "danger", last_reported: new Date().toISOString() },
+    ],
+  });
+  renderAt("/trajet", <Route path="/trajet" element={<Trajet />} />);
+  fireEvent.change(screen.getByPlaceholderText("Point de départ"), { target: { value: "Cocody" } });
+  fireEvent.change(screen.getByPlaceholderText("Destination"), { target: { value: "Plateau" } });
+  fireEvent.click(screen.getByText(/Scanner l.itinéraire/));
+
+  expect(await screen.findByText("Zones à risque historique")).toBeInTheDocument();
+  expect(screen.getByText(/Bd Lagunaire/)).toBeInTheDocument();
+  expect(screen.getByText(/4 signalements historiques/)).toBeInTheDocument();
 });
 
 test("Profile prompts to log in when signed out", () => {

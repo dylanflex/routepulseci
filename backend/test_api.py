@@ -733,3 +733,55 @@ def test_road_conditions_returns_colored_segments(client):
     assert seg["level"] == "danger"
     assert len(seg["coords"]) >= 2
     assert all(len(pt) == 2 for pt in seg["coords"])
+
+
+# --- Historical risk zones -------------------------------------------------
+
+
+def test_risk_zone_requires_minimum_occurrences(client):
+    road = f"Rue Test {uuid.uuid4().hex[:8]}"
+    for _ in range(2):
+        _create_incident(client, type="flood", road=road)
+    zones = client.get("/api/risk-zones").json()
+    assert not any(z["road"] == road for z in zones)
+
+    # A 3rd report of the same (road, type) crosses the threshold.
+    _create_incident(client, type="flood", road=road)
+    zones = client.get("/api/risk-zones").json()
+    zone = next(z for z in zones if z["road"] == road)
+    assert zone["type"] == "flood"
+    assert zone["occurrences"] == 3
+
+
+def test_risk_zone_counts_expired_incidents_too(client):
+    # A recurring pattern must still show even if every individual report has
+    # long since aged off the live map (server.is_incident_active) -- that's
+    # the whole point: a pattern the live map alone can't convey.
+    road = f"Rue Test {uuid.uuid4().hex[:8]}"
+    ids = []
+    for _ in range(3):
+        incident = _create_incident(client, type="degraded", road=road)
+        _backdate_incident(incident["id"], minutes_ago=10000)  # past pothole TTL
+        ids.append(incident["id"])
+
+    live_ids = [i["id"] for i in client.get("/api/incidents").json()]
+    assert not any(i in live_ids for i in ids)
+
+    zones = client.get("/api/risk-zones").json()
+    zone = next(z for z in zones if z["road"] == road)
+    assert zone["occurrences"] == 3
+
+
+def test_scan_route_surfaces_historical_risk_zones_on_corridor(client):
+    road = f"Rue Test {uuid.uuid4().hex[:8]}"
+    # A point on the Cocody -> Plateau straight-line fallback route (no
+    # GraphHopper key in tests), so it lands inside the scanned corridor.
+    for _ in range(3):
+        incident = _create_incident(
+            client, type="flood", road=road, lat=5.342, lng=-3.999, severity="danger"
+        )
+        _backdate_incident(incident["id"], minutes_ago=5000)  # past flood TTL
+
+    res = client.post("/api/route/scan", json={"from": "Cocody", "to": "Plateau"})
+    zones = res.json()["historical_risk_zones"]
+    assert any(z["road"] == road for z in zones)

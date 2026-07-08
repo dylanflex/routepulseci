@@ -12,7 +12,7 @@ import { speak, primeSpeech } from "@/lib/voice";
 import { toast } from "sonner";
 import {
   ArrowRight, Clock, TrendingDown, AlertTriangle, Search, Route as RouteIcon,
-  Sparkles, LocateFixed, Check,
+  Sparkles, LocateFixed, Check, History,
 } from "lucide-react";
 
 export default function Trajet() {
@@ -173,6 +173,38 @@ export default function Trajet() {
               </p>
             )}
           </div>
+
+          {/* Historical risk zones — recurring patterns (e.g. "floods every
+              rainy season") that hold even without a live incident right now */}
+          {result.historical_risk_zones?.length > 0 && (
+            <div className="mt-5">
+              <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+                <History className="w-4 h-4 text-warning" /> Zones à risque historique
+              </h3>
+              <div className="mt-3 space-y-2">
+                {result.historical_risk_zones.map((z) => {
+                  const meta = INCIDENT_TYPES[z.type] || { label: z.type, icon: "AlertTriangle" };
+                  const Icon = getIncidentIcon(meta.icon);
+                  return (
+                    <div key={`${z.road}-${z.type}`} className="flex items-center gap-3 p-3 rounded-2xl bg-warning/5 border border-warning/20">
+                      <div
+                        className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ backgroundColor: trafficColorVar(z.typical_severity, 0.15), color: trafficColorVar(z.typical_severity) }}
+                      >
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm text-foreground truncate">{meta.label} récurrent — {z.road}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {z.occurrences} signalements historiques · dernier {formatRelativeTime(z.last_reported)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Alerts along the way */}
           <div className="mt-5">

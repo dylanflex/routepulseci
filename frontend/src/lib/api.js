@@ -34,6 +34,7 @@ export const api = {
   leaderboard: (limit = 10) => request(`/leaderboard?limit=${limit}`),
   myStats: () => request("/me/stats"),
   roadConditions: () => request("/road-conditions"),
+  riskZones: () => request("/risk-zones"),
   createIncident: (body) => request("/incidents", { method: "POST", body: JSON.stringify(body) }),
   confirmIncident: (id) => request(`/incidents/${id}/confirm`, { method: "POST" }),
 
