@@ -113,6 +113,28 @@ let webpackConfig = {
         webpackConfig.plugins.push(healthPluginInstance);
       }
 
+      // CRA's babel-loader has a second rule (besides the one for src/) that
+      // also transpiles .js files inside node_modules, to down-compile any
+      // dependency shipped as raw ES2015+/ESM. Running mapbox-gl's already-
+      // browser-ready UMD dist through it introduces webpack-require-wrapped
+      // babel helpers (e.g. "_slicedToArray") into mapbox-gl's source. That
+      // breaks mapbox-gl's own worker bootstrap, which extracts a substring
+      // of its bundle into a Blob to run as a Web Worker: the extracted
+      // substring ends up calling a helper that only exists via
+      // __webpack_require__(id) in the main thread's module registry, which
+      // doesn't exist in the worker's isolated global scope -- causing
+      // "<helper> is not defined" ReferenceErrors inside vector-tile parsing
+      // (a different missing helper each build, depending on module ids).
+      // Fix: make mapbox-gl bypass babel-loader entirely so its file reaches
+      // the bundle byte-for-byte, exactly as it does via a plain <script> tag.
+      const oneOfRules = webpackConfig.module.rules.find((rule) => Array.isArray(rule.oneOf))?.oneOf;
+      if (oneOfRules) {
+        oneOfRules.unshift({
+          test: /\.m?js$/,
+          include: /[\\/]node_modules[\\/]mapbox-gl[\\/]/,
+        });
+      }
+
       // Force mapbox-gl into its own named chunk. Terser's exclude/test option
       // matches against the *output asset name*, not the source module path —
       // without this, mapbox-gl gets fused into an anonymously-numbered chunk
