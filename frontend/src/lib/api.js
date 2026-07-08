@@ -1,4 +1,6 @@
-const BASE_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
+// TEMP DEBUG: hardcoded fallback to rule out a missing/unset Vercel env var
+// while diagnosing the blank-map issue. Revert once confirmed.
+const BASE_URL = process.env.REACT_APP_BACKEND_URL || "https://api.entreprise-md.online";
 const TOKEN_KEY = "routepulse_token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
