@@ -9,9 +9,11 @@ Each test mints a unique username so the module-shared database stays free of
 cross-test collisions (pytest.ini pins a module to a single xdist worker).
 """
 
+import asyncio
 import os
 import tempfile
 import uuid
+from datetime import datetime, timedelta, timezone
 
 # Point the app at an isolated database *before* importing it.
 _DB_PATH = os.path.join(tempfile.gettempdir(), f"routepulse_test_{uuid.uuid4().hex}.db")
@@ -128,6 +130,21 @@ def _create_incident(client, **overrides):
     return client.post("/api/incidents", json=payload).json()
 
 
+def _backdate_incident(incident_id: str, minutes_ago: float) -> None:
+    """Rewrite an incident's created_at directly in the DB, to test TTL
+    expiry without waiting for real time to pass."""
+
+    async def _do():
+        async with server.SessionLocal() as session:
+            incident = await session.get(server.IncidentORM, incident_id)
+            incident.created_at = datetime.now(timezone.utc) - timedelta(
+                minutes=minutes_ago
+            )
+            await session.commit()
+
+    asyncio.run(_do())
+
+
 def test_create_incident_starts_unconfirmed(client):
     # A fresh report is a claim, not yet a validated fact — see server.py's
     # IncidentORM.confirmed comment for why this must not default to 1.
@@ -207,6 +224,51 @@ def test_invalid_severity_is_422(client):
         },
     )
     assert res.status_code == 422
+
+
+def test_incident_expires_off_the_map_after_its_type_ttl(client):
+    # A jam's TTL is 45 min (server.INCIDENT_TTL_MINUTES) -- push it well past
+    # that and it must disappear from the live list, road conditions, stats'
+    # active count, and the route-scan corridor, with nothing to undo it (no
+    # resolve/delete endpoint exists).
+    incident = _create_incident(client, type="jam")
+    _backdate_incident(incident["id"], minutes_ago=200)
+
+    ids = [i["id"] for i in client.get("/api/incidents").json()]
+    assert incident["id"] not in ids
+
+
+def test_incident_within_ttl_still_shows(client):
+    incident = _create_incident(client, type="flood")  # 12h TTL
+    _backdate_incident(incident["id"], minutes_ago=60)
+
+    ids = [i["id"] for i in client.get("/api/incidents").json()]
+    assert incident["id"] in ids
+
+
+def test_expired_incident_excluded_from_road_conditions_and_stats(client):
+    before_stats = client.get("/api/stats").json()
+    incident = _create_incident(client, type="jam")
+    _backdate_incident(incident["id"], minutes_ago=200)
+
+    segments = client.get("/api/road-conditions").json()
+    assert all(incident["id"] != s.get("incident_id") for s in segments)
+
+    after_stats = client.get("/api/stats").json()
+    # The expired incident must not have bumped the active count, even though
+    # it was counted at creation time before being backdated.
+    assert after_stats["activeAlerts"] == before_stats["activeAlerts"]
+
+
+def test_expired_incident_excluded_from_route_scan(client):
+    incident = _create_incident(
+        client, type="accident", lat=5.34, lng=-4.0, road="Bd Test", severity="danger"
+    )
+    _backdate_incident(incident["id"], minutes_ago=400)  # accident TTL is 3h
+
+    res = client.post("/api/route/scan", json={"from": "Cocody", "to": "Plateau"})
+    alert_ids = [a.get("id") for a in res.json()["alerts"]]
+    assert incident["id"] not in alert_ids
 
 
 # --- Posts ---------------------------------------------------------------

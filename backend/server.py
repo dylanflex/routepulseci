@@ -488,6 +488,24 @@ class IncidentType(str, Enum):
     works = "works"
 
 
+# How long an incident stays on the map/route recommendations after being
+# reported, before it's treated as stale and filtered out everywhere it's
+# read. Without this, a report from weeks ago would still color roads and
+# factor into the "avant de partir" reroute decision forever -- there is no
+# other mechanism (no resolve/delete endpoint) that ever clears one.
+# Durations reflect how long each condition realistically still matters:
+# jams clear fast, a flood or a pothole take much longer to resolve.
+INCIDENT_TTL_MINUTES: dict[str, int] = {
+    "jam": 45,
+    "accident": 180,
+    "flood": 720,
+    "police": 360,
+    "works": 360,
+    "degraded": 2880,
+}
+DEFAULT_INCIDENT_TTL_MINUTES = 180
+
+
 class Severity(str, Enum):
     fluid = "fluid"
     dense = "dense"
@@ -661,6 +679,21 @@ def serialize_comment(c: CommentORM, liked_ids: Collection[str] = ()) -> dict:
     }
 
 
+def is_incident_active(incident: IncidentORM, now: datetime | None = None) -> bool:
+    """False once an incident has outlived its type's TTL (see
+    INCIDENT_TTL_MINUTES). SQLite/aiosqlite round-trips DateTime columns as
+    naive datetimes even though they're written as UTC-aware, so naive values
+    read back here are reinterpreted as UTC rather than compared against a
+    naive "now" (which would silently drift with the server's local time).
+    """
+    now = now or datetime.now(timezone.utc)
+    created_at = incident.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    ttl = INCIDENT_TTL_MINUTES.get(incident.type, DEFAULT_INCIDENT_TTL_MINUTES)
+    return created_at + timedelta(minutes=ttl) > now
+
+
 def serialize_incident(inc: IncidentORM, confirmed_ids: Collection[str] = ()) -> dict:
     return {
         "id": inc.id,
@@ -824,14 +857,19 @@ async def list_incidents(
         select(IncidentORM).order_by(IncidentORM.created_at.desc())
     )
     confirmed_ids = await user_incident_confirm_set(current_user, session)
-    return [serialize_incident(i, confirmed_ids) for i in result.scalars().all()]
+    return [
+        serialize_incident(i, confirmed_ids)
+        for i in result.scalars().all()
+        if is_incident_active(i)
+    ]
 
 
 @api_router.get("/stats")
 async def community_stats(session: AsyncSession = Depends(get_session)):
     """Live community numbers for the landing page — derived from the real DB
     instead of hardcoded marketing figures."""
-    active_alerts = await session.scalar(select(func.count()).select_from(IncidentORM))
+    all_incidents = (await session.execute(select(IncidentORM))).scalars().all()
+    active_alerts = sum(1 for i in all_incidents if is_incident_active(i))
     # People who have actually posted, not every registered account — a more
     # honest "community" number that a signed-up lurker doesn't inflate.
     contributors = await session.scalar(
@@ -961,7 +999,7 @@ async def road_conditions(session: AsyncSession = Depends(get_session)):
     """Real road stretches near each incident, coloured by severity, for the
     live map. Cached per incident server-side (see routing._ROAD_SEGMENT_CACHE)."""
     result = await session.execute(select(IncidentORM))
-    incidents = result.scalars().all()
+    incidents = [i for i in result.scalars().all() if is_incident_active(i)]
     async with httpx.AsyncClient() as client:
         return await routing.road_conditions(incidents, client)
 
@@ -986,7 +1024,7 @@ async def scan_route(
         base = await routing.compute_route(origin, dest, client)
 
         result = await session.execute(select(IncidentORM))
-        incidents = result.scalars().all()
+        incidents = [i for i in result.scalars().all() if is_incident_active(i)]
         alerts = routing.incidents_on_route(
             incidents, base["route"], base["distance_m"]
         )
