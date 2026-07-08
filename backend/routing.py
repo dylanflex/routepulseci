@@ -173,6 +173,18 @@ def _hit_label(hit: dict) -> str:
     return name
 
 
+# Place-name -> resolved location is effectively static (Abidjan streets don't
+# move), so cache both lookups by normalized query text, same reasoning as
+# _ROAD_SEGMENT_CACHE below. Without this, the same handful of common place
+# names (Cocody, Plateau, Riviera, ...) typed by different users/route scans
+# each cost their own GraphHopper call -- easily the largest avoidable chunk
+# of daily quota, since geocode() alone is called twice per route scan (from
+# + to) on top of whatever the autocomplete already spent on suggest().
+# Process-lifetime cache; fine for a single instance (see _ROAD_SEGMENT_CACHE).
+_GEOCODE_CACHE: dict[str, dict] = {}
+_SUGGEST_CACHE: dict[str, List[dict]] = {}
+
+
 async def geocode(query: str, client: httpx.AsyncClient) -> dict:
     """Resolve a place name to {name, lat, lng}. Falls back to the gazetteer."""
     query = (query or "").strip()
@@ -181,6 +193,12 @@ async def geocode(query: str, client: httpx.AsyncClient) -> dict:
     if coords:
         return {"name": "Ma position", "lat": coords[0], "lng": coords[1]}
 
+    cache_key = query.lower()
+    cached = _GEOCODE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result = None
     if GRAPHHOPPER_KEY:
         try:
             r = await client.get(
@@ -201,25 +219,32 @@ async def geocode(query: str, client: httpx.AsyncClient) -> dict:
             for hit in hits:
                 pt = hit.get("point") or {}
                 if "lat" in pt and "lng" in pt and in_ci_bounds(pt["lat"], pt["lng"]):
-                    return {
+                    result = {
                         "name": hit.get("name") or query,
                         "lat": pt["lat"],
                         "lng": pt["lng"],
                     }
+                    break
             # No Ivorian match — fall through to the local gazetteer below.
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             logger.warning("GraphHopper geocode failed for %r: %s", query, exc)
             # fall through to the gazetteer
 
-    lowered = query.lower()
-    for key, (lat, lng) in ABIDJAN_GAZETTEER.items():
-        if key in lowered:
-            return {"name": query or key.title(), "lat": lat, "lng": lng}
-    return {
-        "name": query or "Abidjan",
-        "lat": ABIDJAN_CENTER[0],
-        "lng": ABIDJAN_CENTER[1],
-    }
+    if result is None:
+        lowered = query.lower()
+        for key, (lat, lng) in ABIDJAN_GAZETTEER.items():
+            if key in lowered:
+                result = {"name": query or key.title(), "lat": lat, "lng": lng}
+                break
+    if result is None:
+        result = {
+            "name": query or "Abidjan",
+            "lat": ABIDJAN_CENTER[0],
+            "lng": ABIDJAN_CENTER[1],
+        }
+
+    _GEOCODE_CACHE[cache_key] = result
+    return result
 
 
 async def suggest(query: str, client: httpx.AsyncClient) -> List[dict]:
@@ -233,6 +258,12 @@ async def suggest(query: str, client: httpx.AsyncClient) -> List[dict]:
     if coords:
         return [{"name": "Ma position", "lat": coords[0], "lng": coords[1]}]
 
+    cache_key = query.lower()
+    cached = _SUGGEST_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result: List[dict] | None = None
     if GRAPHHOPPER_KEY:
         try:
             r = await client.get(
@@ -262,18 +293,21 @@ async def suggest(query: str, client: httpx.AsyncClient) -> List[dict]:
                         }
                     )
             if out:
-                return out[:6]
+                result = out[:6]
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             logger.warning("GraphHopper suggest failed for %r: %s", query, exc)
             # fall through to the gazetteer
 
-    lowered = query.lower()
-    matches = [
-        {"name": key.title(), "lat": lat, "lng": lng}
-        for key, (lat, lng) in ABIDJAN_GAZETTEER.items()
-        if lowered in key or key in lowered
-    ]
-    return matches[:6]
+    if result is None:
+        lowered = query.lower()
+        result = [
+            {"name": key.title(), "lat": lat, "lng": lng}
+            for key, (lat, lng) in ABIDJAN_GAZETTEER.items()
+            if lowered in key or key in lowered
+        ][:6]
+
+    _SUGGEST_CACHE[cache_key] = result
+    return result
 
 
 # --- Routing -------------------------------------------------------------

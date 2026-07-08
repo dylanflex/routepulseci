@@ -87,3 +87,60 @@ def test_geocode_gazetteer_fallback_when_no_key(monkeypatch):
     got = asyncio.run(routing.geocode("Depuis le Plateau au bureau", client=None))
     assert got["name"]
     assert abs(got["lat"] - 5.3240) < 0.02  # resolved to Plateau
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _CountingClient:
+    """Stands in for httpx.AsyncClient, counting real HTTP calls so a cache
+    hit can be asserted by "the count didn't go up", not by mocking internals."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = 0
+
+    async def get(self, *args, **kwargs):
+        self.calls += 1
+        return _FakeResponse(self.payload)
+
+
+def test_geocode_caches_by_normalized_query(monkeypatch):
+    # Repeated identical queries (very common -- the same handful of Abidjan
+    # place names get typed by many users/scans) must hit GraphHopper once,
+    # not once per call, since that's the single largest avoidable chunk of
+    # daily quota (see routing._GEOCODE_CACHE).
+    monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "fake-key")
+    routing._GEOCODE_CACHE.clear()
+    client = _CountingClient(
+        {"hits": [{"name": "Cocody", "point": {"lat": 5.34, "lng": -3.98}}]}
+    )
+
+    first = asyncio.run(routing.geocode("Cocody", client))
+    second = asyncio.run(routing.geocode("cocody", client))  # different case
+    third = asyncio.run(routing.geocode(" Cocody ", client))  # different whitespace
+
+    assert client.calls == 1
+    assert first == second == third
+
+
+def test_suggest_caches_by_normalized_query(monkeypatch):
+    monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "fake-key")
+    routing._SUGGEST_CACHE.clear()
+    client = _CountingClient(
+        {"hits": [{"name": "Plateau", "point": {"lat": 5.324, "lng": -4.024}}]}
+    )
+
+    first = asyncio.run(routing.suggest("Plateau", client))
+    second = asyncio.run(routing.suggest("PLATEAU", client))
+
+    assert client.calls == 1
+    assert first == second
