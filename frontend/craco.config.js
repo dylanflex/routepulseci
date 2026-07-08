@@ -113,17 +113,37 @@ let webpackConfig = {
         webpackConfig.plugins.push(healthPluginInstance);
       }
 
+      // Force mapbox-gl into its own named chunk. Terser's exclude/test option
+      // matches against the *output asset name*, not the source module path —
+      // without this, mapbox-gl gets fused into an anonymously-numbered chunk
+      // (e.g. "1.<hash>.chunk.js") that no regex on "node_modules/mapbox-gl"
+      // can ever match, so the exclude below silently does nothing.
+      webpackConfig.optimization.splitChunks = {
+        ...webpackConfig.optimization.splitChunks,
+        cacheGroups: {
+          ...webpackConfig.optimization.splitChunks?.cacheGroups,
+          mapboxGl: {
+            test: /[\\/]node_modules[\\/]mapbox-gl[\\/]/,
+            name: "mapbox-gl",
+            chunks: "all",
+            enforce: true,
+          },
+        },
+      };
+
       // Parallel Terser minification spawns worker processes that have been
       // observed to crash with an access violation on memory-constrained
       // Windows hosts once larger deps are bundled in. mapbox-gl v3 is large
       // enough that even single-threaded minification exhausts memory ("Zone"
-      // OOM) on an 8 GB host — so we disable parallelism AND skip re-minifying
-      // mapbox-gl (its shipped dist is already compact).
+      // OOM) on an 8 GB host, and re-minifying its already-compact dist has
+      // also been observed to corrupt its worker bundle (undefined variable
+      // references inside mapbox-gl's dynamically-loaded worker) — so we
+      // disable parallelism AND skip re-minifying the named mapbox-gl chunk.
       if (webpackConfig.optimization?.minimizer) {
         webpackConfig.optimization.minimizer.forEach((minimizer) => {
           if (minimizer.options && "parallel" in minimizer.options) {
             minimizer.options.parallel = false;
-            minimizer.options.exclude = /[\\/]node_modules[\\/]mapbox-gl[\\/]/;
+            minimizer.options.exclude = /mapbox-gl/;
           }
         });
       }
