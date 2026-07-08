@@ -166,11 +166,15 @@ export default function Profile() {
         <div className="mt-3 rounded-2xl bg-card border border-border overflow-hidden">
           {[
             { icon: Bell, label: "Notifications", hint: "Alertes autour de toi" },
-            { icon: MapPin, label: "Zones favorites", hint: "3 zones" },
-            { icon: Shield, label: "Confidentialité", hint: "Anonymat par défaut" },
-            { icon: Settings, label: "Préférences", hint: "Thème, langue, unités" },
+            { icon: MapPin, label: "Zones favorites", hint: "Tes lieux fréquents" },
+            { icon: Shield, label: "Confidentialité", hint: "Anonymat sur tes contributions" },
+            { icon: Settings, label: "Préférences", hint: "Voix, langue, unités" },
           ].map((item, idx) => (
-            <button key={idx} className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-muted/40 border-b border-border last:border-b-0 text-left">
+            <Link
+              key={idx}
+              to="/app/parametres"
+              className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-muted/40 border-b border-border last:border-b-0 text-left"
+            >
               <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
                 <item.icon className="w-4 h-4 text-foreground" />
               </div>
@@ -179,7 +183,7 @@ export default function Profile() {
                 <p className="text-xs text-muted-foreground">{item.hint}</p>
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            </button>
+            </Link>
           ))}
         </div>
       </div>

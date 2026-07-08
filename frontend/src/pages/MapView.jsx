@@ -43,6 +43,16 @@ export default function MapView() {
     }
   };
 
+  const handleShareSelected = async () => {
+    const link = `${window.location.origin}/app/carte?lat=${selected.lat}&lng=${selected.lng}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success("Lien copié 🔗");
+    } catch {
+      toast.error("Impossible de copier le lien", { description: link });
+    }
+  };
+
   return (
     <div className="px-4 pt-4">
       <div>
@@ -178,7 +188,7 @@ export default function MapView() {
                   >
                     {selected.confirmed_by_me ? "Confirmé ✓" : "Confirmer"}
                   </Button>
-                  <Button variant="outline" className="flex-1 rounded-xl" onClick={() => toast("Lien copié 🔗")}>
+                  <Button variant="outline" className="flex-1 rounded-xl" onClick={handleShareSelected}>
                     <Share2 className="w-4 h-4 mr-2" /> Partager
                   </Button>
                 </div>

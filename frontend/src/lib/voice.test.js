@@ -1,4 +1,4 @@
-import { isVoiceSupported, isVoiceEnabled, setVoiceEnabled, speak, stopSpeaking } from "@/lib/voice";
+import { isVoiceSupported, isVoiceEnabled, setVoiceEnabled, speak, stopSpeaking, primeSpeech } from "@/lib/voice";
 
 // jsdom ships neither SpeechSynthesis nor SpeechSynthesisUtterance — stand in
 // with minimal fakes so the module's browser-API calls are exercised.
@@ -54,4 +54,16 @@ test("speak() is a silent no-op with empty text", () => {
 test("stopSpeaking() cancels ongoing speech", () => {
   stopSpeaking();
   expect(window.speechSynthesis.cancel).toHaveBeenCalled();
+});
+
+test("primeSpeech() speaks an empty utterance to keep mobile user-activation alive", () => {
+  primeSpeech();
+  expect(window.SpeechSynthesisUtterance).toHaveBeenCalledWith("");
+  expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(1);
+});
+
+test("primeSpeech() is a silent no-op when muted", () => {
+  setVoiceEnabled(false);
+  primeSpeech();
+  expect(window.speechSynthesis.speak).not.toHaveBeenCalled();
 });

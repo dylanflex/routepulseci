@@ -25,6 +25,18 @@ export const stopSpeaking = () => {
   if (isVoiceSupported()) window.speechSynthesis.cancel();
 };
 
+// iOS Safari (and some Android browsers) only grant SpeechSynthesis a "user
+// activation" window tied to the synchronous portion of the gesture that
+// triggered it. Our real speak() call happens after an `await` on a route-
+// scan network request, by which point that window has closed — the browser
+// silently drops the utterance with no error. Call this synchronously at the
+// very top of the click handler, before any `await`, to keep the gesture's
+// activation alive so the later speak() call still works on mobile.
+export const primeSpeech = () => {
+  if (!isVoiceSupported() || !isVoiceEnabled()) return;
+  window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+};
+
 // Speaks french text aloud. Cancels any announcement already in progress
 // first so a second route scan doesn't queue up and talk over the first.
 export const speak = (text) => {

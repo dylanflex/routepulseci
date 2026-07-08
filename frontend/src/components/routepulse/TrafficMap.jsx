@@ -11,7 +11,7 @@ import { trafficColorHex, RECO_STYLE } from "@/lib/traffic";
 import { useAppData } from "@/context/AppDataContext";
 import { api } from "@/lib/api";
 import { getCurrentPosition } from "@/lib/geo";
-import { speak } from "@/lib/voice";
+import { speak, primeSpeech } from "@/lib/voice";
 
 // Full Mapbox GL JS. Public token (pk.*) is safe to ship client-side; it comes
 // from REACT_APP_MAPBOX_TOKEN (frontend/.env) so it isn't hardcoded in source.
@@ -85,6 +85,7 @@ export const TrafficMap = ({
 
   const runPlannerScan = async () => {
     if (!plannerFromSend.trim() || !plannerToSend.trim()) return;
+    primeSpeech();
     setPlannerLoading(true);
     try {
       const data = await api.scanRoute({ from: plannerFromSend, to: plannerToSend });

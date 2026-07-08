@@ -8,6 +8,7 @@ import { Activity, Bell, ChevronLeft, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/context/AuthContext";
 
 // An incident younger than this drives the unread dot on the bell.
 const RECENT_MS = 15 * 60 * 1000;
@@ -18,7 +19,9 @@ export default function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { incidents, posts } = useAppData();
-  const isDetail = pathname.includes("/feed/");
+  const { user } = useAuth();
+  const isDetail = pathname.includes("/feed/") || pathname.includes("/parametres");
+  const backTo = pathname.includes("/parametres") ? "/app/profil" : "/app/feed";
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -27,9 +30,12 @@ export default function AppShell() {
     () => [...incidents].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6),
     [incidents],
   );
+  // Logged-out users have no setting to read yet -- default to on, same as
+  // the server-side column default for a fresh account.
+  const notificationsEnabled = user ? user.notify_nearby_incidents : true;
   const hasUnread = useMemo(
-    () => incidents.some((i) => Date.now() - new Date(i.created_at).getTime() < RECENT_MS),
-    [incidents],
+    () => notificationsEnabled && incidents.some((i) => Date.now() - new Date(i.created_at).getTime() < RECENT_MS),
+    [incidents, notificationsEnabled],
   );
 
   const results = useMemo(() => {
@@ -61,7 +67,7 @@ export default function AppShell() {
       <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-lg border-b border-border">
         <div className="mx-auto max-w-2xl px-4 h-14 flex items-center justify-between">
           {isDetail ? (
-            <Link to="/app/feed" className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+            <Link to={backTo} className="flex items-center gap-1.5 text-sm font-medium text-foreground">
               <ChevronLeft className="w-5 h-5" /> Retour
             </Link>
           ) : (

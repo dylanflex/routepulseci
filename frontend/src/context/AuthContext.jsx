@@ -36,8 +36,17 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  // Persists a settings change (privacy/notifications) and refreshes the
+  // shared `user` object so every consumer (bell dot, settings page) sees the
+  // new value immediately, without each caller re-fetching /auth/me itself.
+  const updateSettings = useCallback(async (partial) => {
+    const updated = await api.updateMySettings(partial);
+    setUser(updated);
+    return updated;
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateSettings }}>{children}</AuthContext.Provider>
   );
 }
 

@@ -74,12 +74,25 @@ function AppData({ children }) {
   const confirmIncidentMutation = useMutation({ mutationFn: (id) => api.confirmIncident(id), onSuccess: patchIncident });
 
   const addCommentMutation = useMutation({
-    mutationFn: ({ postId, text }) => api.createComment(postId, { text }),
+    mutationFn: ({ postId, text, parentCommentId }) =>
+      api.createComment(postId, { text, parent_comment_id: parentCommentId ?? null }),
     onSuccess: (comment, { postId }) => {
       setCommentsByPost((prev) => ({ ...prev, [postId]: [...(prev[postId] || []), comment] }));
       qc.setQueryData(["posts"], (prev = []) => prev.map((p) => (p.id === postId ? { ...p, comments: p.comments + 1 } : p)));
     },
   });
+
+  const likeCommentMutation = useMutation({
+    mutationFn: ({ commentId }) => api.likeComment(commentId),
+    onSuccess: (updated, { postId }) => {
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: (prev[postId] || []).map((c) => (c.id === updated.id ? updated : c)),
+      }));
+    },
+  });
+
+  const reportPostMutation = useMutation({ mutationFn: (postId) => api.reportPost(postId) });
 
   const submitReportMutation = useMutation({
     mutationFn: async ({ type, severity, note, postToFeed, image }) => {
@@ -108,7 +121,15 @@ function AppData({ children }) {
   const likePost = useCallback((postId) => likeMutation.mutateAsync(postId), [likeMutation]);
   const confirmPost = useCallback((postId) => confirmPostMutation.mutateAsync(postId), [confirmPostMutation]);
   const confirmIncident = useCallback((id) => confirmIncidentMutation.mutateAsync(id), [confirmIncidentMutation]);
-  const addComment = useCallback((postId, text) => addCommentMutation.mutateAsync({ postId, text }), [addCommentMutation]);
+  const addComment = useCallback(
+    (postId, text, parentCommentId) => addCommentMutation.mutateAsync({ postId, text, parentCommentId }),
+    [addCommentMutation],
+  );
+  const likeComment = useCallback(
+    (postId, commentId) => likeCommentMutation.mutateAsync({ postId, commentId }),
+    [likeCommentMutation],
+  );
+  const reportPost = useCallback((postId) => reportPostMutation.mutateAsync(postId), [reportPostMutation]);
   const submitReport = useCallback((args) => submitReportMutation.mutateAsync(args), [submitReportMutation]);
 
   const fetchComments = useCallback(async (postId) => {
@@ -133,6 +154,8 @@ function AppData({ children }) {
     confirmPost,
     confirmIncident,
     addComment,
+    likeComment,
+    reportPost,
     submitReport,
     fetchComments,
   };

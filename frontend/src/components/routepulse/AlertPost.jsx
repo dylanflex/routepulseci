@@ -8,13 +8,14 @@ import { useAppData } from "@/context/AppDataContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
 export const AlertPost = ({ post, compact = false }) => {
   const [saved, setSaved] = useState(false);
   const navigate = useNavigate();
-  const { likePost, confirmPost } = useAppData();
+  const { likePost, confirmPost, reportPost } = useAppData();
   // Server is the source of truth for the current user's vote state (§3.3),
   // so the same post stays consistent across the feed, detail and profile.
   const liked = post.liked_by_me;
@@ -30,12 +31,23 @@ export const AlertPost = ({ post, compact = false }) => {
     }
   };
 
-  const handleShare = () => {
-    toast.success("Lien copié dans le presse-papier", { description: "Partage avec ta communauté 🙌" });
+  const handleShare = async () => {
+    const link = `${window.location.origin}/app/feed/${post.id}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success("Lien copié dans le presse-papier", { description: "Partage avec ta communauté 🙌" });
+    } catch {
+      toast.error("Impossible de copier le lien", { description: link });
+    }
   };
 
-  const handleReport = () => {
-    toast("Signalement envoyé", { description: "Un modérateur va vérifier ce contenu." });
+  const handleReport = async () => {
+    try {
+      await reportPost(post.id);
+      toast("Signalement envoyé", { description: "Un modérateur va vérifier ce contenu." });
+    } catch (err) {
+      toast.error(err.message || "Signalement impossible", { description: "Connecte-toi pour signaler." });
+    }
   };
 
   const handleConfirm = async () => {
@@ -79,9 +91,21 @@ export const AlertPost = ({ post, compact = false }) => {
             <span>{formatRelativeTime(post.created_at)}</span>
           </div>
         </div>
-        <button className="p-1.5 rounded-full hover:bg-muted transition-colors" aria-label="Plus">
-          <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="p-1.5 rounded-full hover:bg-muted transition-colors" aria-label="Plus">
+              <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleShare}>
+              <Share2 className="w-4 h-4 mr-2" /> Copier le lien
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleReport} className="text-destructive focus:text-destructive">
+              <Flag className="w-4 h-4 mr-2" /> Signaler
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Type banner */}
@@ -130,14 +154,9 @@ export const AlertPost = ({ post, compact = false }) => {
           <ShieldCheck className={`w-4 h-4 ${confirmedByMe ? "fill-accent/20" : ""}`} />
           <span className="text-xs font-medium hidden sm:inline">{confirmedByMe ? "Confirmé" : "Confirmer"}</span>
         </Button>
-        <div className="flex">
-          <Button variant="ghost" size="icon" onClick={() => setSaved(!saved)} className="h-9 w-9 rounded-xl text-muted-foreground">
-            <Bookmark className={`w-4 h-4 ${saved ? "fill-primary text-primary" : ""}`} />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={handleReport} className="h-9 w-9 rounded-xl text-muted-foreground">
-            <Flag className="w-4 h-4" />
-          </Button>
-        </div>
+        <Button variant="ghost" size="icon" onClick={() => setSaved(!saved)} className="h-9 w-9 rounded-xl text-muted-foreground">
+          <Bookmark className={`w-4 h-4 ${saved ? "fill-primary text-primary" : ""}`} />
+        </Button>
       </div>
     </motion.article>
   );

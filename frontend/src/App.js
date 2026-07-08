@@ -20,6 +20,7 @@ const PostDetail = lazy(() => import("@/pages/PostDetail"));
 const Report = lazy(() => import("@/pages/Report"));
 const Trajet = lazy(() => import("@/pages/Trajet"));
 const Profile = lazy(() => import("@/pages/Profile"));
+const Settings = lazy(() => import("@/pages/Settings"));
 
 function App() {
   return (
@@ -40,6 +41,7 @@ function App() {
                   <Route path="signaler" element={<Report />} />
                   <Route path="trajet" element={<Trajet />} />
                   <Route path="profil" element={<Profile />} />
+                  <Route path="parametres" element={<Settings />} />
                 </Route>
               </Routes>
             </Suspense>

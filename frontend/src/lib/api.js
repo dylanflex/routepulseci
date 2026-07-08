@@ -1,6 +1,4 @@
-// TEMP DEBUG: hardcoded fallback to rule out a missing/unset Vercel env var
-// while diagnosing the blank-map issue. Revert once confirmed.
-const BASE_URL = process.env.REACT_APP_BACKEND_URL || "https://api.entreprise-md.online";
+const BASE_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
 const TOKEN_KEY = "routepulse_token";
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
@@ -20,6 +18,9 @@ async function request(path, options) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || `${options?.method || "GET"} ${path} failed: ${res.status}`);
   }
+  // 204 (e.g. DELETE /me/favorite-zones/{id}) has no body -- res.json() would
+  // throw on the empty string.
+  if (res.status === 204) return null;
   return res.json();
 }
 
@@ -43,6 +44,14 @@ export const api = {
 
   listComments: (postId) => request(`/posts/${postId}/comments`),
   createComment: (postId, body) => request(`/posts/${postId}/comments`, { method: "POST", body: JSON.stringify(body) }),
+  likeComment: (commentId) => request(`/comments/${commentId}/like`, { method: "POST" }),
+
+  reportPost: (id) => request(`/posts/${id}/report`, { method: "POST" }),
+
+  updateMySettings: (body) => request("/me/settings", { method: "PATCH", body: JSON.stringify(body) }),
+  listFavoriteZones: () => request("/me/favorite-zones"),
+  createFavoriteZone: (body) => request("/me/favorite-zones", { method: "POST", body: JSON.stringify(body) }),
+  deleteFavoriteZone: (id) => request(`/me/favorite-zones/${id}`, { method: "DELETE" }),
 
   scanRoute: (body) => request("/route/scan", { method: "POST", body: JSON.stringify(body) }),
   // `signal` lets callers abort a stale in-flight suggestion request (see

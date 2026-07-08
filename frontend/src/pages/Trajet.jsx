@@ -8,7 +8,7 @@ import { getIncidentIcon, trafficColorVar, RECO_STYLE } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { api } from "@/lib/api";
 import { getCurrentPosition } from "@/lib/geo";
-import { speak } from "@/lib/voice";
+import { speak, primeSpeech } from "@/lib/voice";
 import { toast } from "sonner";
 import {
   ArrowRight, Clock, TrendingDown, AlertTriangle, Search, Route as RouteIcon,
@@ -27,6 +27,7 @@ export default function Trajet() {
 
   const scan = async () => {
     if (!fromSend.trim() || !toSend.trim()) return;
+    primeSpeech();
     setLoading(true);
     setShowReroute(false);
     try {

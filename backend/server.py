@@ -65,6 +65,17 @@ class UserORM(Base):
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     avatar: Mapped[str] = mapped_column(String, default="")
+    # Privacy setting ("Confidentialité"): whether this user's real name/handle
+    # are shown to OTHER viewers on their posts. Always bypassed for the
+    # user's own view of their own content (see resolve_authors' viewer_id) so
+    # turning this off never breaks a user's ability to recognize their own
+    # posts/leaderboard row.
+    show_real_name: Mapped[bool] = mapped_column(default=True)
+    # Notifications setting: whether nearby incidents drive the bell's unread
+    # dot in AppShell. Purely a client-side filter switch — there is no push/
+    # email delivery to configure, so this is the only thing "notifications"
+    # can honestly mean here.
+    notify_nearby_incidents: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -135,6 +146,13 @@ class CommentORM(Base):
     user_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("users.id"), nullable=True
     )
+    # Self-referential FK for one level of replies. Nullable: a top-level
+    # comment has none. Deliberately flat (a reply can't itself be replied to)
+    # rather than arbitrarily deep threading, which the feed's compact card
+    # layout isn't built to render.
+    parent_comment_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("comments.id"), nullable=True
+    )
     author: Mapped[str] = mapped_column(String, nullable=False)
     avatar: Mapped[str] = mapped_column(String, default="")
     text: Mapped[str] = mapped_column(String, nullable=False)
@@ -181,6 +199,51 @@ class IncidentConfirmORM(Base):
     )
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id"), primary_key=True
+    )
+
+
+# Same idempotent-toggle pattern as PostLikeORM, for comment likes.
+class CommentLikeORM(Base):
+    __tablename__ = "comment_likes"
+
+    comment_id: Mapped[str] = mapped_column(
+        String, ForeignKey("comments.id"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), primary_key=True
+    )
+
+
+# One row per (post, user) reporter, but *not* a toggle like the vote tables
+# above — reporting is a one-way flag for future moderation review, not
+# something a user would want to "undo" by clicking again, so a repeat report
+# is just a no-op rather than deleting the row.
+class PostReportORM(Base):
+    __tablename__ = "post_reports"
+
+    post_id: Mapped[str] = mapped_column(
+        String, ForeignKey("posts.id"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class FavoriteZoneORM(Base):
+    __tablename__ = "favorite_zones"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lng: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
@@ -385,6 +448,28 @@ class UserOut(BaseModel):
     username: str
     display_name: str
     avatar: str
+    show_real_name: bool
+    notify_nearby_incidents: bool
+    created_at: datetime
+
+
+class SettingsUpdate(BaseModel):
+    show_real_name: bool | None = None
+    notify_nearby_incidents: bool | None = None
+
+
+class FavoriteZoneCreate(BaseModel):
+    name: str
+    lat: float
+    lng: float
+
+
+class FavoriteZoneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    lat: float
+    lng: float
     created_at: datetime
 
 
@@ -465,27 +550,34 @@ class PostOut(BaseModel):
 
 class CommentCreate(BaseModel):
     text: str
+    parent_comment_id: str | None = None
 
 
 class CommentOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
     id: str
     post_id: str
     user_id: str | None
+    parent_comment_id: str | None
     author: str
     avatar: str
     text: str
     likes: int
+    liked_by_me: bool
     created_at: datetime
 
 
 async def resolve_authors(
-    session: AsyncSession, user_ids: Collection[str]
+    session: AsyncSession, user_ids: Collection[str], viewer_id: str | None = None
 ) -> dict[str, dict]:
     """Live {name, handle, avatar, verified, badge} per user id, computed from
     their current display name/avatar and total posts + confirmations — the
     same tier calculation the leaderboard and /me/stats use. Batched by id so
     listing N posts costs one query instead of N.
+
+    An author with show_real_name=False is anonymized for every OTHER viewer,
+    but never for themselves (viewer_id == user_id) — otherwise turning the
+    privacy setting on would make a user's own posts unrecognizable in their
+    own profile/feed.
     """
     if not user_ids:
         return {}
@@ -495,6 +587,7 @@ async def resolve_authors(
             UserORM.display_name,
             UserORM.username,
             UserORM.avatar,
+            UserORM.show_real_name,
             func.count(PostORM.id),
             func.coalesce(func.sum(PostORM.confirmed), 0),
         )
@@ -503,14 +596,26 @@ async def resolve_authors(
         .group_by(UserORM.id)
     )
     authors: dict[str, dict] = {}
-    for user_id, name, username, avatar, posts, confirmations in rows.all():
+    for (
+        user_id,
+        name,
+        username,
+        avatar,
+        show_real_name,
+        posts,
+        confirmations,
+    ) in rows.all():
         tier = gamification.tier_for_points(
             gamification.points_for(posts, int(confirmations))
         )
+        if show_real_name or user_id == viewer_id:
+            display_name, handle, disp_avatar = name, f"@{username}", avatar
+        else:
+            display_name, handle, disp_avatar = "Contributeur anonyme", "@anonyme", "?"
         authors[user_id] = {
-            "name": name,
-            "handle": f"@{username}",
-            "avatar": avatar,
+            "name": display_name,
+            "handle": handle,
+            "avatar": disp_avatar,
             "verified": gamification.is_verified(tier),
             "badge": tier,
         }
@@ -538,6 +643,21 @@ def serialize_post(
         "liked_by_me": p.id in liked_ids,
         "confirmed_by_me": p.id in confirmed_ids,
         "created_at": p.created_at,
+    }
+
+
+def serialize_comment(c: CommentORM, liked_ids: Collection[str] = ()) -> dict:
+    return {
+        "id": c.id,
+        "post_id": c.post_id,
+        "user_id": c.user_id,
+        "parent_comment_id": c.parent_comment_id,
+        "author": c.author,
+        "avatar": c.avatar,
+        "text": c.text,
+        "likes": c.likes,
+        "liked_by_me": c.id in liked_ids,
+        "created_at": c.created_at,
     }
 
 
@@ -614,11 +734,30 @@ async def adjust_incident_counter(
     )
 
 
+async def adjust_comment_counter(
+    session: AsyncSession, comment_id: str, delta: int
+) -> None:
+    """Same atomic, floored-at-0 update as adjust_post_counter, for CommentORM.likes."""
+    col = CommentORM.likes
+    await session.execute(
+        update(CommentORM)
+        .where(CommentORM.id == comment_id)
+        .values(likes=case((col + delta < 0, 0), else_=col + delta))
+    )
+
+
 async def get_post_or_404(post_id: str, session: AsyncSession) -> PostORM:
     post = await session.get(PostORM, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     return post
+
+
+async def get_comment_or_404(comment_id: str, session: AsyncSession) -> CommentORM:
+    comment = await session.get(CommentORM, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return comment
 
 
 async def get_incident_or_404(incident_id: str, session: AsyncSession) -> IncidentORM:
@@ -899,7 +1038,8 @@ async def list_posts(
     result = await session.execute(select(PostORM).order_by(PostORM.created_at.desc()))
     posts = result.scalars().all()
     liked_ids, confirmed_ids = await user_post_vote_sets(current_user, session)
-    authors = await resolve_authors(session, {p.author_id for p in posts})
+    viewer_id = current_user.id if current_user else None
+    authors = await resolve_authors(session, {p.author_id for p in posts}, viewer_id)
     return [
         serialize_post(p, authors[p.author_id], liked_ids, confirmed_ids) for p in posts
     ]
@@ -917,7 +1057,7 @@ async def create_post(
     await session.refresh(post)
     # Badge = earned tier (this post included), so the feed shows real
     # standing instead of a value frozen at whatever tier existed pre-post.
-    authors = await resolve_authors(session, {current_user.id})
+    authors = await resolve_authors(session, {current_user.id}, current_user.id)
     return serialize_post(post, authors[current_user.id])
 
 
@@ -943,7 +1083,7 @@ async def like_post(
     await session.commit()
     await session.refresh(post)
     _, confirmed_ids = await user_post_vote_sets(current_user, session)
-    authors = await resolve_authors(session, {post.author_id})
+    authors = await resolve_authors(session, {post.author_id}, current_user.id)
     return serialize_post(
         post, authors[post.author_id], {post_id} if liked else set(), confirmed_ids
     )
@@ -971,24 +1111,58 @@ async def confirm_post(
     await session.commit()
     await session.refresh(post)
     liked_ids, _ = await user_post_vote_sets(current_user, session)
-    authors = await resolve_authors(session, {post.author_id})
+    authors = await resolve_authors(session, {post.author_id}, current_user.id)
     return serialize_post(
         post, authors[post.author_id], liked_ids, {post_id} if confirmed else set()
     )
+
+
+# --- Reports (moderation signal, no admin UI yet) -------------------------
+
+
+@api_router.post("/posts/{post_id}/report")
+async def report_post(
+    post_id: str,
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    await get_post_or_404(post_id, session)
+    # No-op on repeat reports from the same user rather than a toggle — see
+    # PostReportORM for why this isn't "undoable" like a like/confirm.
+    existing = await session.get(
+        PostReportORM, {"post_id": post_id, "user_id": current_user.id}
+    )
+    if existing is None:
+        session.add(PostReportORM(post_id=post_id, user_id=current_user.id))
+        await session.commit()
+    return {"reported": True}
 
 
 # --- Comments -----------------------------------------------------------
 
 
 @api_router.get("/posts/{post_id}/comments", response_model=List[CommentOut])
-async def list_comments(post_id: str, session: AsyncSession = Depends(get_session)):
+async def list_comments(
+    post_id: str,
+    current_user: UserORM | None = Depends(get_current_user_optional),
+    session: AsyncSession = Depends(get_session),
+):
     await get_post_or_404(post_id, session)
     result = await session.execute(
         select(CommentORM)
         .where(CommentORM.post_id == post_id)
         .order_by(CommentORM.created_at)
     )
-    return result.scalars().all()
+    comments = result.scalars().all()
+    liked_ids: set[str] = set()
+    if current_user:
+        liked_rows = await session.execute(
+            select(CommentLikeORM.comment_id).where(
+                CommentLikeORM.user_id == current_user.id
+            )
+        )
+        liked_ids = set(liked_rows.scalars().all())
+    return [serialize_comment(c, liked_ids) for c in comments]
 
 
 @api_router.post("/posts/{post_id}/comments", response_model=CommentOut)
@@ -998,7 +1172,11 @@ async def create_comment(
     current_user: UserORM = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    post = await get_post_or_404(post_id, session)
+    await get_post_or_404(post_id, session)
+    if payload.parent_comment_id:
+        parent = await session.get(CommentORM, payload.parent_comment_id)
+        if not parent or parent.post_id != post_id:
+            raise HTTPException(status_code=400, detail="Invalid parent comment")
     comment = CommentORM(
         post_id=post_id,
         user_id=current_user.id,
@@ -1010,7 +1188,86 @@ async def create_comment(
     await adjust_post_counter(session, post_id, "comments_count", 1)
     await session.commit()
     await session.refresh(comment)
-    return comment
+    return serialize_comment(comment)
+
+
+@api_router.post("/comments/{comment_id}/like", response_model=CommentOut)
+async def like_comment(
+    comment_id: str,
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # Toggle, same idempotent pattern as like_post.
+    comment = await get_comment_or_404(comment_id, session)
+    existing = await session.get(
+        CommentLikeORM, {"comment_id": comment_id, "user_id": current_user.id}
+    )
+    if existing is not None:
+        await session.delete(existing)
+        await adjust_comment_counter(session, comment_id, -1)
+        liked_ids: set[str] = set()
+    else:
+        session.add(CommentLikeORM(comment_id=comment_id, user_id=current_user.id))
+        await adjust_comment_counter(session, comment_id, 1)
+        liked_ids = {comment_id}
+    await session.commit()
+    await session.refresh(comment)
+    return serialize_comment(comment, liked_ids)
+
+
+# --- Settings & favorite zones --------------------------------------------
+
+
+@api_router.patch("/me/settings", response_model=UserOut)
+async def update_my_settings(
+    payload: SettingsUpdate,
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(current_user, key, value)
+    await session.commit()
+    await session.refresh(current_user)
+    return current_user
+
+
+@api_router.get("/me/favorite-zones", response_model=List[FavoriteZoneOut])
+async def list_favorite_zones(
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(FavoriteZoneORM)
+        .where(FavoriteZoneORM.user_id == current_user.id)
+        .order_by(FavoriteZoneORM.created_at)
+    )
+    return result.scalars().all()
+
+
+@api_router.post("/me/favorite-zones", response_model=FavoriteZoneOut)
+async def create_favorite_zone(
+    payload: FavoriteZoneCreate,
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    zone = FavoriteZoneORM(user_id=current_user.id, **payload.model_dump())
+    session.add(zone)
+    await session.commit()
+    await session.refresh(zone)
+    return zone
+
+
+@api_router.delete("/me/favorite-zones/{zone_id}", status_code=204)
+async def delete_favorite_zone(
+    zone_id: str,
+    current_user: UserORM = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    zone = await session.get(FavoriteZoneORM, zone_id)
+    if not zone or zone.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    await session.delete(zone)
+    await session.commit()
 
 
 # CORS is registered before the router purely for readability — middleware

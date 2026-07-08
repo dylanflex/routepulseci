@@ -347,6 +347,223 @@ def test_comment_requires_auth(client):
     )
 
 
+def test_comment_like_is_idempotent_toggle(client):
+    headers, _, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    comment = client.post(
+        f"/api/posts/{post['id']}/comments", headers=headers, json={"text": "Bien vu"}
+    ).json()
+    assert comment["likes"] == 0
+    assert comment["liked_by_me"] is False
+
+    liked = client.post(f"/api/comments/{comment['id']}/like", headers=headers).json()
+    assert liked["likes"] == 1
+    assert liked["liked_by_me"] is True
+
+    again = client.post(f"/api/comments/{comment['id']}/like", headers=headers).json()
+    assert again["likes"] == 0
+    assert again["liked_by_me"] is False
+
+
+def test_comment_like_requires_auth(client):
+    headers, _, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    comment = client.post(
+        f"/api/posts/{post['id']}/comments", headers=headers, json={"text": "x"}
+    ).json()
+    assert client.post(f"/api/comments/{comment['id']}/like").status_code == 401
+
+
+def test_comment_reply_is_linked_to_parent(client):
+    headers, _, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    parent = client.post(
+        f"/api/posts/{post['id']}/comments",
+        headers=headers,
+        json={"text": "Question ?"},
+    ).json()
+    reply = client.post(
+        f"/api/posts/{post['id']}/comments",
+        headers=headers,
+        json={"text": "Réponse.", "parent_comment_id": parent["id"]},
+    ).json()
+    assert reply["parent_comment_id"] == parent["id"]
+
+    comments = client.get(f"/api/posts/{post['id']}/comments").json()
+    assert any(
+        c["id"] == reply["id"] and c["parent_comment_id"] == parent["id"]
+        for c in comments
+    )
+
+
+def test_comment_reply_rejects_parent_from_another_post(client):
+    headers, _, _ = register(client)
+    post_a = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "a"},
+    ).json()
+    post_b = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "b"},
+    ).json()
+    parent = client.post(
+        f"/api/posts/{post_a['id']}/comments", headers=headers, json={"text": "x"}
+    ).json()
+    res = client.post(
+        f"/api/posts/{post_b['id']}/comments",
+        headers=headers,
+        json={"text": "y", "parent_comment_id": parent["id"]},
+    )
+    assert res.status_code == 400
+
+
+# --- Post reports (moderation signal) -------------------------------------
+
+
+def test_report_post_requires_auth(client):
+    headers, _, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=headers,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    assert client.post(f"/api/posts/{post['id']}/report").status_code == 401
+
+
+def test_report_post_is_repeatable_without_error(client):
+    author, _, _ = register(client)
+    reporter, _, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=author,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    # Unlike like/confirm, reporting isn't a toggle -- clicking twice must not
+    # error or flip any state back, just stay reported.
+    first = client.post(f"/api/posts/{post['id']}/report", headers=reporter)
+    second = client.post(f"/api/posts/{post['id']}/report", headers=reporter)
+    assert first.status_code == 200 and first.json() == {"reported": True}
+    assert second.status_code == 200 and second.json() == {"reported": True}
+
+
+# --- Settings (privacy / notifications) -----------------------------------
+
+
+def test_update_settings_requires_auth(client):
+    assert (
+        client.patch("/api/me/settings", json={"show_real_name": False}).status_code
+        == 401
+    )
+
+
+def test_privacy_setting_anonymizes_author_for_other_viewers_only(client):
+    author, author_user, author_username = register(client, display_name="Privacy Test")
+    other, _, _ = register(client)
+
+    updated = client.patch(
+        "/api/me/settings", headers=author, json={"show_real_name": False}
+    ).json()
+    assert updated["show_real_name"] is False
+
+    post = client.post(
+        "/api/posts",
+        headers=author,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "x"},
+    ).json()
+    # The author still sees their own real name/handle on their own post...
+    assert post["author"]["handle"] == f"@{author_username}"
+
+    # ...but another viewer, and an anonymous one, see it anonymized.
+    as_other = next(
+        p
+        for p in client.get("/api/posts", headers=other).json()
+        if p["id"] == post["id"]
+    )
+    as_anon = next(p for p in client.get("/api/posts").json() if p["id"] == post["id"])
+    assert as_other["author"]["handle"] == "@anonyme"
+    assert as_anon["author"]["handle"] == "@anonyme"
+
+
+def test_notify_nearby_incidents_setting_persists(client):
+    headers, _, _ = register(client)
+    assert (
+        client.get("/api/auth/me", headers=headers).json()["notify_nearby_incidents"]
+        is True
+    )
+    updated = client.patch(
+        "/api/me/settings", headers=headers, json={"notify_nearby_incidents": False}
+    ).json()
+    assert updated["notify_nearby_incidents"] is False
+    assert (
+        client.get("/api/auth/me", headers=headers).json()["notify_nearby_incidents"]
+        is False
+    )
+
+
+# --- Favorite zones --------------------------------------------------------
+
+
+def test_favorite_zones_require_auth(client):
+    assert client.get("/api/me/favorite-zones").status_code == 401
+    assert (
+        client.post(
+            "/api/me/favorite-zones", json={"name": "Cocody", "lat": 5.3, "lng": -4.0}
+        ).status_code
+        == 401
+    )
+
+
+def test_favorite_zones_crud(client):
+    headers, _, _ = register(client)
+    assert client.get("/api/me/favorite-zones", headers=headers).json() == []
+
+    zone = client.post(
+        "/api/me/favorite-zones",
+        headers=headers,
+        json={"name": "Cocody Angré", "lat": 5.38, "lng": -3.99},
+    ).json()
+    assert zone["name"] == "Cocody Angré"
+
+    zones = client.get("/api/me/favorite-zones", headers=headers).json()
+    assert [z["id"] for z in zones] == [zone["id"]]
+
+    assert (
+        client.delete(
+            f"/api/me/favorite-zones/{zone['id']}", headers=headers
+        ).status_code
+        == 204
+    )
+    assert client.get("/api/me/favorite-zones", headers=headers).json() == []
+
+
+def test_favorite_zone_delete_is_scoped_to_owner(client):
+    owner, _, _ = register(client)
+    other, _, _ = register(client)
+    zone = client.post(
+        "/api/me/favorite-zones",
+        headers=owner,
+        json={"name": "Marcory", "lat": 5.29, "lng": -3.98},
+    ).json()
+    res = client.delete(f"/api/me/favorite-zones/{zone['id']}", headers=other)
+    assert res.status_code == 404
+    # Untouched: still there for the real owner.
+    assert len(client.get("/api/me/favorite-zones", headers=owner).json()) == 1
+
+
 # --- Community ranking (gamification) ------------------------------------
 
 
