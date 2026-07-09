@@ -182,10 +182,12 @@ export const TrafficMap = ({
     const markReady = () => {
       if (removed || readied) return;
       readied = true;
-      // Dusk lighting on the 3D basemap reads well against the dark app shell
-      // while keeping roads and the route legible.
+      // Day lighting keeps the 3D basemap bright and legible (roads, labels,
+      // the route line) instead of the moodier dusk/night presets — closer to
+      // the clear, high-contrast look of dedicated nav apps (Yango, Google
+      // Maps) than a stylized dark map.
       try {
-        map.setConfigProperty("basemap", "lightPreset", "dusk");
+        map.setConfigProperty("basemap", "lightPreset", "day");
         map.setConfigProperty("basemap", "show3dObjects", true);
       } catch {
         /* older style/config API — 3D buildings still ship by default */

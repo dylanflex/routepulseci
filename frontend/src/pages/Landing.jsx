@@ -500,6 +500,7 @@ const Footer = () => (
         <span className="text-xs text-muted-foreground ml-2">© 2025 · Made with <Heart className="inline w-3 h-3 text-primary fill-primary" /> à Abidjan</span>
       </div>
       <div className="flex gap-6 text-xs text-muted-foreground">
+        <Link to="/collectivites" className="hover:text-foreground">Collectivités &amp; partenaires</Link>
         <a href="#" className="hover:text-foreground">Confidentialité</a>
         <a href="#" className="hover:text-foreground">CGU</a>
         <a href="#" className="hover:text-foreground">Presse</a>

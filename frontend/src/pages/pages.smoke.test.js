@@ -12,6 +12,8 @@ import PostDetail from "@/pages/PostDetail";
 import Report from "@/pages/Report";
 import Trajet from "@/pages/Trajet";
 import Profile from "@/pages/Profile";
+import MunicipalDashboard from "@/pages/MunicipalDashboard";
+import Moderation from "@/pages/Moderation";
 
 // react-scripts' Jest config sets resetMocks: true, which strips mock
 // implementations before every test — so they must be (re)established in
@@ -27,6 +29,9 @@ jest.mock("@/lib/api", () => {
       listIncidents: jest.fn(),
       roadConditions: jest.fn(),
       riskZones: jest.fn(),
+      municipalDashboard: jest.fn(),
+      moderationQueue: jest.fn(),
+      unhidePost: jest.fn(),
       createIncident: jest.fn(),
       confirmIncident: jest.fn(),
       listPosts: jest.fn(),
@@ -68,6 +73,13 @@ beforeEach(() => {
   api.register.mockResolvedValue({ access_token: "t", user: fakeUser });
   api.suggestPlaces.mockResolvedValue([]);
   api.scanRoute.mockResolvedValue({ from: {}, to: {}, distance_km: 1, duration_min: 1, route: [], alerts: [], severe_count: 0, reroute: null, recommendation: null, historical_risk_zones: [] });
+  api.municipalDashboard.mockResolvedValue({
+    generated_at: now,
+    citywide: { total_reports: 12, active_incidents: 3, risk_zones: 1 },
+    communes: [{ commune: "Cocody", total_reports: 8, active_incidents: 2, risk_zones: 1, top_type: "flood" }],
+  });
+  api.moderationQueue.mockResolvedValue([]);
+  api.unhidePost.mockResolvedValue({ hidden: false });
 });
 
 const renderAt = (path, route) =>
@@ -84,6 +96,13 @@ const renderAt = (path, route) =>
 test("Landing renders the hero", () => {
   renderAt("/", <Route path="/" element={<Landing />} />);
   expect(screen.getAllByText(/RoutePulse/i).length).toBeGreaterThan(0);
+});
+
+test("MunicipalDashboard renders per-commune aggregates", async () => {
+  renderAt("/collectivites", <Route path="/collectivites" element={<MunicipalDashboard />} />);
+  const commune = await screen.findByText("Cocody");
+  expect(screen.getByText("12")).toBeInTheDocument();
+  expect(commune.closest("tr")).toHaveTextContent("1 zone");
 });
 
 test("Login renders the form", () => {
@@ -200,4 +219,45 @@ test("Profile shows the real user once authenticated", async () => {
   setToken("fake-token");
   renderAt("/profil", <Route path="/profil" element={<Profile />} />);
   expect(await screen.findByText("Aya K.")).toBeInTheDocument();
+});
+
+test("Profile only shows the Modération entry to an admin", async () => {
+  setToken("fake-token");
+  renderAt("/profil", <Route path="/profil" element={<Profile />} />);
+  await screen.findByText("Aya K.");
+  expect(screen.queryByText("Modération")).not.toBeInTheDocument();
+});
+
+test("Moderation prompts to log in when signed out", () => {
+  renderAt("/moderation", <Route path="/moderation" element={<Moderation />} />);
+  expect(screen.getByText("Connecte-toi")).toBeInTheDocument();
+});
+
+test("Moderation blocks a signed-in non-admin", async () => {
+  setToken("fake-token");
+  renderAt("/moderation", <Route path="/moderation" element={<Moderation />} />);
+  expect(await screen.findByText("Accès réservé")).toBeInTheDocument();
+});
+
+test("Moderation lets an admin see reports and unhide a post", async () => {
+  api.me.mockResolvedValueOnce({ ...fakeUser, is_admin: true });
+  api.moderationQueue.mockResolvedValueOnce([
+    {
+      id: "p1",
+      text: "faux signalement ?",
+      author: { name: "Aya K.", avatar: "AK" },
+      report_count: 3,
+      hidden: true,
+      created_at: new Date().toISOString(),
+    },
+  ]);
+  setToken("fake-token");
+  renderAt("/moderation", <Route path="/moderation" element={<Moderation />} />);
+
+  expect(await screen.findByText("faux signalement ?")).toBeInTheDocument();
+  expect(screen.getByText("3 signalements")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByText("Restaurer"));
+  await Promise.resolve();
+  expect(api.unhidePost).toHaveBeenCalledWith("p1");
 });

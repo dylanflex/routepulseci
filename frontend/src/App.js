@@ -21,6 +21,8 @@ const Report = lazy(() => import("@/pages/Report"));
 const Trajet = lazy(() => import("@/pages/Trajet"));
 const Profile = lazy(() => import("@/pages/Profile"));
 const Settings = lazy(() => import("@/pages/Settings"));
+const MunicipalDashboard = lazy(() => import("@/pages/MunicipalDashboard"));
+const Moderation = lazy(() => import("@/pages/Moderation"));
 
 function App() {
   return (
@@ -33,6 +35,7 @@ function App() {
                 <Route path="/" element={<Landing />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                <Route path="/collectivites" element={<MunicipalDashboard />} />
                 <Route path="/app" element={<AppShell />}>
                   <Route index element={<MapView />} />
                   <Route path="carte" element={<MapView />} />
@@ -42,6 +45,7 @@ function App() {
                   <Route path="trajet" element={<Trajet />} />
                   <Route path="profil" element={<Profile />} />
                   <Route path="parametres" element={<Settings />} />
+                  <Route path="moderation" element={<Moderation />} />
                 </Route>
               </Routes>
             </Suspense>

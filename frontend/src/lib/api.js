@@ -35,6 +35,7 @@ export const api = {
   myStats: () => request("/me/stats"),
   roadConditions: () => request("/road-conditions"),
   riskZones: () => request("/risk-zones"),
+  municipalDashboard: () => request("/admin/dashboard"),
   createIncident: (body) => request("/incidents", { method: "POST", body: JSON.stringify(body) }),
   confirmIncident: (id) => request(`/incidents/${id}/confirm`, { method: "POST" }),
 
@@ -48,6 +49,8 @@ export const api = {
   likeComment: (commentId) => request(`/comments/${commentId}/like`, { method: "POST" }),
 
   reportPost: (id) => request(`/posts/${id}/report`, { method: "POST" }),
+  moderationQueue: () => request("/admin/moderation"),
+  unhidePost: (id) => request(`/admin/moderation/${id}/unhide`, { method: "POST" }),
 
   updateMySettings: (body) => request("/me/settings", { method: "PATCH", body: JSON.stringify(body) }),
   listFavoriteZones: () => request("/me/favorite-zones"),

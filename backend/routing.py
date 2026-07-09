@@ -89,6 +89,19 @@ def in_ci_bounds(lat: float, lng: float) -> bool:
     return lat_min <= lat <= lat_max and lng_min <= lng <= lng_max
 
 
+def nearest_commune(lat: float, lng: float) -> str:
+    """Snap a point to the closest known Abidjan district. Incidents are only
+    stored as raw lat/lng, so this is what lets the municipal dashboard
+    (server.municipal_dashboard) aggregate "reports per commune" for a city/
+    OSER partner without a dedicated commune column."""
+    best_name, best_dist = None, float("inf")
+    for name, (glat, glng) in ABIDJAN_GAZETTEER.items():
+        d = haversine_m(lat, lng, glat, glng)
+        if d < best_dist:
+            best_dist, best_name = d, name
+    return best_name.title() if best_name else "Abidjan"
+
+
 # --- Geometry ------------------------------------------------------------
 
 

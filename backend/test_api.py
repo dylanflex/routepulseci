@@ -569,6 +569,81 @@ def test_report_post_is_repeatable_without_error(client):
     assert second.status_code == 200 and second.json() == {"reported": True}
 
 
+def _admin_headers(client):
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "moderateur", "password": "routepulse-demo"},
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def test_post_auto_hides_after_report_threshold(client):
+    author, _, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=author,
+        json={"location": "L", "type": "jam", "severity": "dense", "text": "spam?"},
+    ).json()
+
+    # server.REPORT_HIDE_THRESHOLD reports from distinct users -- one short
+    # of it must leave the post visible in the feed.
+    for _ in range(server.REPORT_HIDE_THRESHOLD - 1):
+        reporter, _, _ = register(client)
+        client.post(f"/api/posts/{post['id']}/report", headers=reporter)
+    assert post["id"] in [p["id"] for p in client.get("/api/posts").json()]
+
+    last_reporter, _, _ = register(client)
+    client.post(f"/api/posts/{post['id']}/report", headers=last_reporter)
+    assert post["id"] not in [p["id"] for p in client.get("/api/posts").json()]
+
+
+def test_moderation_queue_requires_admin(client):
+    headers, _, _ = register(client)
+    assert client.get("/api/admin/moderation").status_code == 401
+    assert client.get("/api/admin/moderation", headers=headers).status_code == 403
+    assert (
+        client.get("/api/admin/moderation", headers=_admin_headers(client)).status_code
+        == 200
+    )
+
+
+def test_moderation_queue_lists_reported_posts_and_unhide_restores_them(client):
+    author, _, _ = register(client)
+    post = client.post(
+        "/api/posts",
+        headers=author,
+        json={
+            "location": "L",
+            "type": "jam",
+            "severity": "dense",
+            "text": "faux signalement ?",
+        },
+    ).json()
+    for _ in range(server.REPORT_HIDE_THRESHOLD):
+        reporter, _, _ = register(client)
+        client.post(f"/api/posts/{post['id']}/report", headers=reporter)
+
+    admin = _admin_headers(client)
+    queue = client.get("/api/admin/moderation", headers=admin).json()
+    entry = next(e for e in queue if e["id"] == post["id"])
+    assert entry["report_count"] >= server.REPORT_HIDE_THRESHOLD
+    assert entry["hidden"] is True
+
+    res = client.post(f"/api/admin/moderation/{post['id']}/unhide", headers=admin)
+    assert res.status_code == 200, res.text
+    assert post["id"] in [p["id"] for p in client.get("/api/posts").json()]
+
+    # A non-admin can't override a moderator's decision.
+    headers, _, _ = register(client)
+    assert (
+        client.post(
+            f"/api/admin/moderation/{post['id']}/unhide", headers=headers
+        ).status_code
+        == 403
+    )
+
+
 # --- Settings (privacy / notifications) -----------------------------------
 
 
@@ -832,3 +907,31 @@ def test_scan_route_surfaces_historical_risk_zones_on_corridor(client):
     res = client.post("/api/route/scan", json={"from": "Cocody", "to": "Plateau"})
     zones = res.json()["historical_risk_zones"]
     assert any(z["road"] == road for z in zones)
+
+
+# --- Municipal dashboard (B2G) ----------------------------------------------
+
+
+def test_municipal_dashboard_groups_reports_by_commune(client):
+    road = f"Rue Test {uuid.uuid4().hex[:8]}"
+    # (5.36, -3.98) is the Cocody gazetteer point (routing.ABIDJAN_GAZETTEER).
+    _create_incident(client, type="jam", road=road, lat=5.36, lng=-3.98)
+
+    dashboard = client.get("/api/admin/dashboard").json()
+    cocody = next(c for c in dashboard["communes"] if c["commune"] == "Cocody")
+    assert cocody["total_reports"] >= 1
+    assert cocody["active_incidents"] >= 1
+    assert cocody["top_type"] is not None
+    assert dashboard["citywide"]["total_reports"] >= 1
+
+
+def test_municipal_dashboard_counts_risk_zones_per_commune(client):
+    road = f"Rue Test {uuid.uuid4().hex[:8]}"
+    for _ in range(3):
+        # (5.42, -4.02) is the Abobo gazetteer point.
+        _create_incident(client, type="flood", road=road, lat=5.42, lng=-4.02)
+
+    dashboard = client.get("/api/admin/dashboard").json()
+    abobo = next(c for c in dashboard["communes"] if c["commune"] == "Abobo")
+    assert abobo["risk_zones"] >= 1
+    assert dashboard["citywide"]["risk_zones"] >= 1

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { StatChip } from "@/components/routepulse/StatChip";
-import { MapPin, Bell, Settings, Shield, ChevronRight, ShieldCheck, LogOut, Trophy, Sparkles } from "lucide-react";
+import { MapPin, Bell, Settings, Shield, ChevronRight, ShieldCheck, LogOut, Trophy, Sparkles, ShieldAlert } from "lucide-react";
 import { useAppData } from "@/context/AppDataContext";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
@@ -165,14 +165,17 @@ export default function Profile() {
         <h2 className="font-display text-lg font-semibold">Paramètres</h2>
         <div className="mt-3 rounded-2xl bg-card border border-border overflow-hidden">
           {[
-            { icon: Bell, label: "Notifications", hint: "Alertes autour de toi" },
-            { icon: MapPin, label: "Zones favorites", hint: "Tes lieux fréquents" },
-            { icon: Shield, label: "Confidentialité", hint: "Anonymat sur tes contributions" },
-            { icon: Settings, label: "Préférences", hint: "Voix, langue, unités" },
+            { icon: Bell, label: "Notifications", hint: "Alertes autour de toi", to: "/app/parametres" },
+            { icon: MapPin, label: "Zones favorites", hint: "Tes lieux fréquents", to: "/app/parametres" },
+            { icon: Shield, label: "Confidentialité", hint: "Anonymat sur tes contributions", to: "/app/parametres" },
+            { icon: Settings, label: "Préférences", hint: "Voix, langue, unités", to: "/app/parametres" },
+            ...(user.is_admin
+              ? [{ icon: ShieldAlert, label: "Modération", hint: "Contenus signalés", to: "/app/moderation" }]
+              : []),
           ].map((item, idx) => (
             <Link
               key={idx}
-              to="/app/parametres"
+              to={item.to}
               className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-muted/40 border-b border-border last:border-b-0 text-left"
             >
               <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">

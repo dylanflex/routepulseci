@@ -13,6 +13,11 @@ Coordinates are approximate real-world positions around Abidjan's communes in
 # they are demo data, not real credentials.
 DEMO_PASSWORD = "routepulse-demo"
 
+# The one seeded account with moderation rights (server.seed_dataset sets
+# is_admin=True for this username specifically) — lets a demo/jury login show
+# the moderation dashboard without building a real role-assignment UI.
+ADMIN_USERNAME = "moderateur"
+
 # (username, display_name, avatar initials, badge)
 # The badge is only a hint for the intended demo spread — actual badges are
 # always computed live from each account's real seeded posts/confirmations
@@ -42,6 +47,7 @@ USERS = [
     ("armand_kp", "Armand Kpan", "AK", "Nouveau"),
     ("mimi_abj", "Mimi Abj.", "MA", "Contributeur"),
     ("joel_tk", "Joël Tanoh", "JT", "Contributeur"),
+    (ADMIN_USERNAME, "Équipe RoutePulse", "RP", "Équipe"),
 ]
 
 # (type, lat, lng, road, severity, confirmed, age_minutes)
