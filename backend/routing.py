@@ -177,6 +177,27 @@ def parse_latlng(query: str) -> Optional[Tuple[float, float]]:
     return None
 
 
+def extract_origin_destination(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """Deterministic origin/destination guess from a free-text question, using
+    the Abidjan gazetteer — the keyless fallback for the copilot's route mode
+    (ai.extract_route). Needs two distinct known districts; the earlier one in
+    the sentence is taken as the origin ("de Cocody à Plateau"). Returns
+    (None, None) when it can't find two, so the copilot stays in general mode
+    rather than firing a GraphHopper scan on a guess."""
+    low = (text or "").lower()
+    hits: List[Tuple[int, str]] = []
+    seen: set[str] = set()
+    for place in ABIDJAN_GAZETTEER:
+        pos = low.find(place)
+        if pos != -1 and place not in seen:
+            seen.add(place)
+            hits.append((pos, place))
+    if len(hits) < 2:
+        return (None, None)
+    hits.sort()
+    return (hits[0][1], hits[1][1])
+
+
 def _hit_label(hit: dict) -> str:
     """Human label for a GraphHopper geocode hit: 'Name, City' when useful."""
     name = hit.get("name") or ""

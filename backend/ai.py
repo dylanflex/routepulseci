@@ -301,6 +301,16 @@ async def classify_incident_image(image: str) -> dict:
 
 # --- Conversational copilot ------------------------------------------------
 
+_ROUTE_OD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "origin": {"type": ["string", "null"]},
+        "destination": {"type": ["string", "null"]},
+    },
+    "required": ["origin", "destination"],
+    "additionalProperties": False,
+}
+
 _TYPE_LABELS_FR = {
     "degraded": "route dégradée",
     "accident": "accident",
@@ -335,10 +345,56 @@ def _situation_text(incidents: List[dict], risk_zones: List[dict]) -> str:
     return f"Alertes actives :\n{inc_txt}\n\nZones à risque récurrentes :\n{zones_txt}"
 
 
-def _rules_copilot(message: str, incidents: List[dict], risk_zones: List[dict]) -> dict:
+def _route_context_text(route: dict) -> str:
+    """Text block describing a scanned trip + the incidents on its corridor,
+    appended to the copilot's grounding when the question names an O/D."""
+    alerts = route.get("alerts") or []
+    if alerts:
+        alerts_txt = "\n".join(
+            f"- {_TYPE_LABELS_FR.get(a['type'], a['type'])} ({a['severity']}) "
+            f"sur {a['road']}, {a.get('confirmed', 0)} confirmation(s)"
+            for a in alerts
+        )
+    else:
+        alerts_txt = "Aucun incident signalé sur le corridor de ce trajet."
+    return (
+        f"\n\nTRAJET DEMANDÉ : {route['from']} → {route['to']} "
+        f"(~{route['distance_km']} km, ~{route['duration_min']} min).\n"
+        f"Incidents réellement sur ce trajet :\n{alerts_txt}\n"
+        "Réponds spécifiquement sur CE trajet (pas la ville en général)."
+    )
+
+
+def _rules_copilot(
+    message: str,
+    incidents: List[dict],
+    risk_zones: List[dict],
+    route_context: Optional[dict] = None,
+) -> dict:
     """Deterministic fallback copilot — no free-form conversation, but a genuinely
-    useful grounded summary. Filters to a road/commune the question mentions when
-    it can, otherwise summarizes the whole network."""
+    useful grounded summary. When a scanned route is provided, answers about the
+    on-corridor incidents; otherwise summarizes the whole network."""
+    # Route mode: answer about the incidents actually on the scanned corridor.
+    if route_context is not None:
+        alerts = route_context.get("alerts") or []
+        trip = f"{route_context['from']} → {route_context['to']}"
+        if not alerts:
+            reply = (
+                f"Bonne nouvelle : rien de signalé sur ton trajet {trip} "
+                f"(~{route_context['distance_km']} km). Bonne route !"
+            )
+        else:
+            severe = [a for a in alerts if a["severity"] in _SEVERE]
+            roads = ", ".join(dict.fromkeys(a["road"] for a in severe)) or ", ".join(
+                dict.fromkeys(a["road"] for a in alerts)
+            )
+            reply = f"Sur ton trajet {trip} : {len(alerts)} incident(s) signalé(s)" + (
+                f", dont {len(severe)} majeur(s) — attention à {roads}."
+                if severe
+                else f" (surtout {roads}), rien de bloquant."
+            )
+        return {"reply": reply, "source": "rules"}
+
     lowered = (message or "").lower()
     scoped = [i for i in incidents if i["road"].lower() in lowered] or incidents
 
@@ -365,26 +421,70 @@ def _rules_copilot(message: str, incidents: List[dict], risk_zones: List[dict]) 
     return {"reply": reply, "source": "rules"}
 
 
+async def extract_route(message: str, history: List[dict]) -> dict:
+    """Pull an origin + destination out of a free-text question so the copilot
+    can run a real route scan for it. Claude (JSON) when a key is set, gazetteer
+    keyword matching (routing.extract_origin_destination) otherwise. Returns
+    {origin, destination} with either possibly None when not clearly named."""
+    if not (message or "").strip():
+        return {"origin": None, "destination": None}
+    if not ANTHROPIC_KEY:
+        origin, destination = routing.extract_origin_destination(message)
+        return {"origin": origin, "destination": destination}
+    try:
+        import anthropic
+    except ImportError:
+        origin, destination = routing.extract_origin_destination(message)
+        return {"origin": origin, "destination": destination}
+
+    prompt = (
+        "Extrais le lieu de DÉPART et la DESTINATION de ce message d'un usager "
+        "à Abidjan. Si l'un n'est pas explicitement mentionné, mets null. Rends "
+        "les noms tels qu'énoncés.\n"
+        f'Message : "{message}"'
+    )
+    try:
+        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY)
+        resp = await client.messages.create(
+            model=MODEL,
+            max_tokens=120,
+            output_config={
+                "format": {"type": "json_schema", "schema": _ROUTE_OD_SCHEMA},
+                "effort": "low",
+            },
+            messages=[{"role": "user", "content": prompt}],
+        )
+        data = json.loads(next((b.text for b in resp.content if b.type == "text"), ""))
+        return {"origin": data.get("origin"), "destination": data.get("destination")}
+    except Exception:
+        logger.warning("Route O/D extraction failed; using gazetteer", exc_info=True)
+        origin, destination = routing.extract_origin_destination(message)
+        return {"origin": origin, "destination": destination}
+
+
 async def chat_copilot(
     message: str,
     history: List[dict],
     incidents: List[dict],
     risk_zones: List[dict],
+    route_context: Optional[dict] = None,
 ) -> dict:
     """Answer a natural-language mobility question, grounded in the current
-    incidents + recurring risk zones. Claude when a key is set, deterministic
-    grounded summary otherwise — same graceful-degrade contract as recommend()."""
+    incidents + recurring risk zones, and — when the question named an O/D that
+    the caller scanned — the incidents actually on that trip's corridor
+    (route_context). Claude when a key is set, deterministic grounded summary
+    otherwise — same graceful-degrade contract as recommend()."""
     if not (message or "").strip():
         return {
             "reply": "Pose-moi une question sur la circulation à Abidjan 🙂",
             "source": "rules",
         }
     if not ANTHROPIC_KEY:
-        return _rules_copilot(message, incidents, risk_zones)
+        return _rules_copilot(message, incidents, risk_zones, route_context)
     try:
         import anthropic
     except ImportError:
-        return _rules_copilot(message, incidents, risk_zones)
+        return _rules_copilot(message, incidents, risk_zones, route_context)
 
     system = (
         "Tu es le copilote IA de RoutePulse, l'application de mobilité citoyenne "
@@ -393,6 +493,7 @@ async def chat_copilot(
         "l'information n'y figure pas, dis-le franchement plutôt que d'inventer. "
         "Explique brièvement sur quel signalement ou quelle donnée tu te bases.\n\n"
         + _situation_text(incidents, risk_zones)
+        + (_route_context_text(route_context) if route_context else "")
     )
     # Keep only the last few turns to bound token cost; validate roles.
     msgs = [
@@ -411,13 +512,13 @@ async def chat_copilot(
         )
         reply = next((b.text for b in resp.content if b.type == "text"), "").strip()
         if not reply:
-            return _rules_copilot(message, incidents, risk_zones)
+            return _rules_copilot(message, incidents, risk_zones, route_context)
         return {"reply": reply, "source": "ai"}
     except Exception:
         logger.warning(
             "Claude copilot failed; using rule-based fallback", exc_info=True
         )
-        return _rules_copilot(message, incidents, risk_zones)
+        return _rules_copilot(message, incidents, risk_zones, route_context)
 
 
 def _rules_reco(alerts: List[dict], reroute: Optional[dict]) -> dict:

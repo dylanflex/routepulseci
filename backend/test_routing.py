@@ -82,6 +82,22 @@ def test_straight_line_fallback_route():
     assert r["duration_min"] > 0
 
 
+def test_extract_origin_destination_from_de_a_phrasing():
+    assert routing.extract_origin_destination("de Cocody à Plateau") == (
+        "cocody",
+        "plateau",
+    )
+
+
+def test_extract_origin_destination_needs_two_places():
+    # A single named place isn't enough to fire a route scan.
+    assert routing.extract_origin_destination("comment ça se passe à Cocody ?") == (
+        None,
+        None,
+    )
+    assert routing.extract_origin_destination("bonjour") == (None, None)
+
+
 def test_geocode_gazetteer_fallback_when_no_key(monkeypatch):
     monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "")
     got = asyncio.run(routing.geocode("Depuis le Plateau au bureau", client=None))

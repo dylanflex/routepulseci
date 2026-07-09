@@ -1307,13 +1307,40 @@ class CopilotInput(BaseModel):
 async def copilot(payload: CopilotInput, session: AsyncSession = Depends(get_session)):
     """Conversational mobility assistant (see ai.chat_copilot). Grounded
     server-side in the currently-active incidents + recurring risk zones so the
-    client can't spoof the situation it answers about. Public and read-only —
-    it never creates or changes anything, just answers."""
+    client can't spoof the situation it answers about. When the question names
+    an origin + destination, it also runs the real "avant de partir" scan and
+    grounds the answer in the incidents actually on that corridor. Public and
+    read-only — it never creates or changes anything, just answers."""
     result = await session.execute(select(IncidentORM))
     all_incidents = result.scalars().all()
-    active = [serialize_incident(i) for i in all_incidents if is_incident_active(i)]
+    active_orm = [i for i in all_incidents if is_incident_active(i)]
+    active = [serialize_incident(i) for i in active_orm]
     risk_zones = compute_risk_zones(all_incidents)
-    return await ai.chat_copilot(payload.message, payload.history, active, risk_zones)
+
+    # Route mode: only fires a GraphHopper scan when both an origin AND a
+    # destination are named — a lone place stays in general mode, so a passing
+    # mention doesn't burn quota.
+    route_context = None
+    od = await ai.extract_route(payload.message, payload.history)
+    if od.get("origin") and od.get("destination"):
+        async with httpx.AsyncClient() as client:
+            origin = await routing.geocode(od["origin"], client)
+            dest = await routing.geocode(od["destination"], client)
+            base = await routing.compute_route(origin, dest, client)
+            alerts = routing.incidents_on_route(
+                active_orm, base["route"], base["distance_m"]
+            )
+        route_context = {
+            "from": origin["name"],
+            "to": dest["name"],
+            "distance_km": round(base["distance_m"] / 1000.0, 1),
+            "duration_min": round(base["duration_min"]),
+            "alerts": alerts,
+        }
+
+    return await ai.chat_copilot(
+        payload.message, payload.history, active, risk_zones, route_context
+    )
 
 
 @api_router.get("/incidents/clusters")

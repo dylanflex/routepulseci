@@ -976,6 +976,21 @@ def test_copilot_empty_message_is_handled(client):
     assert res.json()["reply"]
 
 
+def test_copilot_route_mode_grounds_answer_on_the_corridor(client):
+    # An active incident on the Cocody -> Plateau straight-line corridor (no
+    # GraphHopper key in tests, so the route is the straight line between them).
+    _create_incident(
+        client, type="flood", road="Bd Corridor Copilot", lat=5.342, lng=-3.999
+    )
+    res = client.post(
+        "/api/copilot", json={"message": "Comment est la route de Cocody à Plateau ?"}
+    )
+    assert res.status_code == 200, res.text
+    # Route mode (both O/D named) -> the rule-based fallback answers about the
+    # trip, not the whole city.
+    assert "trajet" in res.json()["reply"].lower()
+
+
 def test_copilot_accepts_conversation_history(client):
     res = client.post(
         "/api/copilot",
