@@ -1,6 +1,7 @@
 import React, { Suspense, useMemo, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { BottomNav } from "@/components/routepulse/BottomNav";
+import CopilotChat from "@/components/routepulse/CopilotChat";
 import { useAppData } from "@/context/AppDataContext";
 import { INCIDENT_TYPES } from "@/lib/mockData";
 import { formatRelativeTime } from "@/lib/time";
@@ -130,6 +131,9 @@ export default function AppShell() {
       </main>
 
       <BottomNav />
+
+      {/* Conversational AI copilot — floating, available across the app shell */}
+      <CopilotChat />
 
       {/* Search */}
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>

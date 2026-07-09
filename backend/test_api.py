@@ -955,6 +955,42 @@ def test_confirming_an_incident_raises_its_trust(client):
     assert after > before
 
 
+# --- Conversational copilot (keyless fallback in tests) --------------------
+
+
+def test_copilot_answers_and_is_grounded(client):
+    road = f"Bd Copilot {uuid.uuid4().hex[:8]}"
+    _create_incident(client, type="flood", road=road, severity="danger")
+    res = client.post(
+        "/api/copilot", json={"message": "Quelles routes éviter en ce moment ?"}
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["source"] == "rules"  # no ANTHROPIC key in tests
+    assert isinstance(data["reply"], str) and data["reply"]
+
+
+def test_copilot_empty_message_is_handled(client):
+    res = client.post("/api/copilot", json={"message": "   "})
+    assert res.status_code == 200
+    assert res.json()["reply"]
+
+
+def test_copilot_accepts_conversation_history(client):
+    res = client.post(
+        "/api/copilot",
+        json={
+            "message": "Et vers Cocody ?",
+            "history": [
+                {"role": "user", "content": "Comment est la circulation ?"},
+                {"role": "assistant", "content": "Plusieurs alertes actives."},
+            ],
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["reply"]
+
+
 # --- Duplicate merge clustering --------------------------------------------
 
 

@@ -59,6 +59,8 @@ export const api = {
   createFavoriteZone: (body) => request("/me/favorite-zones", { method: "POST", body: JSON.stringify(body) }),
   deleteFavoriteZone: (id) => request(`/me/favorite-zones/${id}`, { method: "DELETE" }),
 
+  copilot: (message, history = []) => request("/copilot", { method: "POST", body: JSON.stringify({ message, history }) }),
+
   scanRoute: (body) => request("/route/scan", { method: "POST", body: JSON.stringify(body) }),
   // `signal` lets callers abort a stale in-flight suggestion request (see
   // PlaceField) instead of letting it race a newer one to the UI.

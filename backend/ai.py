@@ -299,6 +299,127 @@ async def classify_incident_image(image: str) -> dict:
         return _unavailable_classification()
 
 
+# --- Conversational copilot ------------------------------------------------
+
+_TYPE_LABELS_FR = {
+    "degraded": "route dégradée",
+    "accident": "accident",
+    "jam": "embouteillage",
+    "flood": "inondation",
+    "police": "contrôle",
+    "works": "travaux",
+}
+_SEVERE = ("danger", "blocked")
+
+
+def _situation_text(incidents: List[dict], risk_zones: List[dict]) -> str:
+    """Compact French summary of the live situation fed to the copilot (as the
+    model's grounding context, and reused by the keyless fallback)."""
+    if incidents:
+        lines = [
+            f"- {_TYPE_LABELS_FR.get(i['type'], i['type'])} ({i['severity']}) "
+            f"sur {i['road']}, {i.get('confirmed', 0)} confirmation(s)"
+            for i in incidents
+        ]
+        inc_txt = "\n".join(lines)
+    else:
+        inc_txt = "Aucune alerte active."
+    zones_txt = (
+        "\n".join(
+            f"- {_TYPE_LABELS_FR.get(z['type'], z['type'])} récurrent sur "
+            f"{z['road']} ({z['occurrences']} fois)"
+            for z in risk_zones[:5]
+        )
+        or "Aucune."
+    )
+    return f"Alertes actives :\n{inc_txt}\n\nZones à risque récurrentes :\n{zones_txt}"
+
+
+def _rules_copilot(message: str, incidents: List[dict], risk_zones: List[dict]) -> dict:
+    """Deterministic fallback copilot — no free-form conversation, but a genuinely
+    useful grounded summary. Filters to a road/commune the question mentions when
+    it can, otherwise summarizes the whole network."""
+    lowered = (message or "").lower()
+    scoped = [i for i in incidents if i["road"].lower() in lowered] or incidents
+
+    if not incidents:
+        reply = (
+            "Aucune alerte active sur le réseau en ce moment — la route est "
+            "dégagée. Bonne route !"
+        )
+        return {"reply": reply, "source": "rules"}
+
+    severe = [i for i in scoped if i["severity"] in _SEVERE]
+    roads = ", ".join(sorted({i["road"] for i in severe})[:3])
+    if severe:
+        reply = (
+            f"{len(scoped)} alerte(s) dans cette zone. À éviter en priorité : "
+            f"{roads} ({len(severe)} incident(s) majeur(s)). "
+            "Prévois un itinéraire alternatif."
+        )
+    else:
+        reply = (
+            f"{len(scoped)} alerte(s) signalée(s), rien de bloquant pour "
+            "l'instant — surtout des ralentissements. Reste prudent."
+        )
+    return {"reply": reply, "source": "rules"}
+
+
+async def chat_copilot(
+    message: str,
+    history: List[dict],
+    incidents: List[dict],
+    risk_zones: List[dict],
+) -> dict:
+    """Answer a natural-language mobility question, grounded in the current
+    incidents + recurring risk zones. Claude when a key is set, deterministic
+    grounded summary otherwise — same graceful-degrade contract as recommend()."""
+    if not (message or "").strip():
+        return {
+            "reply": "Pose-moi une question sur la circulation à Abidjan 🙂",
+            "source": "rules",
+        }
+    if not ANTHROPIC_KEY:
+        return _rules_copilot(message, incidents, risk_zones)
+    try:
+        import anthropic
+    except ImportError:
+        return _rules_copilot(message, incidents, risk_zones)
+
+    system = (
+        "Tu es le copilote IA de RoutePulse, l'application de mobilité citoyenne "
+        "d'Abidjan. Réponds en français, 2 à 4 phrases maximum, ton concret et "
+        "amical. Appuie-toi UNIQUEMENT sur les données ci-dessous : si "
+        "l'information n'y figure pas, dis-le franchement plutôt que d'inventer. "
+        "Explique brièvement sur quel signalement ou quelle donnée tu te bases.\n\n"
+        + _situation_text(incidents, risk_zones)
+    )
+    # Keep only the last few turns to bound token cost; validate roles.
+    msgs = [
+        {"role": m["role"], "content": m["content"]}
+        for m in (history or [])[-6:]
+        if m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+    msgs.append({"role": "user", "content": message})
+    try:
+        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_KEY)
+        resp = await client.messages.create(
+            model=MODEL,
+            max_tokens=500,
+            system=system,
+            messages=msgs,  # type: ignore[arg-type]
+        )
+        reply = next((b.text for b in resp.content if b.type == "text"), "").strip()
+        if not reply:
+            return _rules_copilot(message, incidents, risk_zones)
+        return {"reply": reply, "source": "ai"}
+    except Exception:
+        logger.warning(
+            "Claude copilot failed; using rule-based fallback", exc_info=True
+        )
+        return _rules_copilot(message, incidents, risk_zones)
+
+
 def _rules_reco(alerts: List[dict], reroute: Optional[dict]) -> dict:
     """Deterministic fallback used when Claude isn't available."""
     severe = [a for a in alerts if a["severity"] in routing.SEVERE_SEVERITIES]

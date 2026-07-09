@@ -14,6 +14,7 @@ import Trajet from "@/pages/Trajet";
 import Profile from "@/pages/Profile";
 import MunicipalDashboard from "@/pages/MunicipalDashboard";
 import Moderation from "@/pages/Moderation";
+import CopilotChat from "@/components/routepulse/CopilotChat";
 
 // react-scripts' Jest config sets resetMocks: true, which strips mock
 // implementations before every test — so they must be (re)established in
@@ -32,6 +33,7 @@ jest.mock("@/lib/api", () => {
       municipalDashboard: jest.fn(),
       classifyIncident: jest.fn(),
       classifyIncidentImage: jest.fn(),
+      copilot: jest.fn(),
       moderationQueue: jest.fn(),
       unhidePost: jest.fn(),
       createIncident: jest.fn(),
@@ -77,6 +79,7 @@ beforeEach(() => {
   api.scanRoute.mockResolvedValue({ from: {}, to: {}, distance_km: 1, duration_min: 1, route: [], alerts: [], severe_count: 0, reroute: null, recommendation: null, historical_risk_zones: [] });
   api.classifyIncident.mockResolvedValue({ type: "accident", severity: "blocked", confidence: 0.8, source: "ai" });
   api.classifyIncidentImage.mockResolvedValue({ type: "flood", severity: "danger", confidence: 0.9, source: "ai" });
+  api.copilot.mockResolvedValue({ reply: "Évite le Bd Latrille, accident confirmé.", source: "ai" });
   api.municipalDashboard.mockResolvedValue({
     generated_at: now,
     citywide: { total_reports: 12, active_incidents: 3, risk_zones: 1 },
@@ -227,6 +230,16 @@ test("Trajet surfaces historical risk zones from a scan", async () => {
   expect(await screen.findByText("Zones à risque historique")).toBeInTheDocument();
   expect(screen.getByText(/Bd Lagunaire/)).toBeInTheDocument();
   expect(screen.getByText(/4 signalements historiques/)).toBeInTheDocument();
+});
+
+test("Copilot chat answers a question grounded in live data", async () => {
+  render(<CopilotChat />);
+  // Opens from the floating trigger, then a suggestion chip sends a question.
+  fireEvent.click(screen.getByLabelText("Ouvrir le copilote IA"));
+  fireEvent.click(screen.getByText("Quelles routes éviter ?"));
+
+  expect(await screen.findByText("Évite le Bd Latrille, accident confirmé.")).toBeInTheDocument();
+  expect(api.copilot).toHaveBeenCalledWith("Quelles routes éviter ?", expect.any(Array));
 });
 
 test("Profile prompts to log in when signed out", () => {

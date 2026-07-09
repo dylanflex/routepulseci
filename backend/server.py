@@ -1296,6 +1296,26 @@ async def risk_zones(session: AsyncSession = Depends(get_session)):
     return compute_risk_zones(result.scalars().all())
 
 
+class CopilotInput(BaseModel):
+    message: str
+    # Prior turns [{role: "user"|"assistant", content: str}] for multi-turn
+    # follow-ups. Optional so a one-shot question works with no client state.
+    history: List[dict] = []
+
+
+@api_router.post("/copilot")
+async def copilot(payload: CopilotInput, session: AsyncSession = Depends(get_session)):
+    """Conversational mobility assistant (see ai.chat_copilot). Grounded
+    server-side in the currently-active incidents + recurring risk zones so the
+    client can't spoof the situation it answers about. Public and read-only —
+    it never creates or changes anything, just answers."""
+    result = await session.execute(select(IncidentORM))
+    all_incidents = result.scalars().all()
+    active = [serialize_incident(i) for i in all_incidents if is_incident_active(i)]
+    risk_zones = compute_risk_zones(all_incidents)
+    return await ai.chat_copilot(payload.message, payload.history, active, risk_zones)
+
+
 @api_router.get("/incidents/clusters")
 async def incident_clusters(session: AsyncSession = Depends(get_session)):
     """Currently-active incidents grouped into merged duplicate clusters
