@@ -30,6 +30,8 @@ jest.mock("@/lib/api", () => {
       roadConditions: jest.fn(),
       riskZones: jest.fn(),
       municipalDashboard: jest.fn(),
+      classifyIncident: jest.fn(),
+      classifyIncidentImage: jest.fn(),
       moderationQueue: jest.fn(),
       unhidePost: jest.fn(),
       createIncident: jest.fn(),
@@ -51,7 +53,7 @@ const fakeUser = { id: "u1", username: "aya", display_name: "Aya K.", avatar: "A
 beforeEach(() => {
   clearToken();
   const now = new Date().toISOString();
-  const incidents = [{ id: "i1", type: "jam", x: 220, y: 130, road: "Bd Latrille", severity: "blocked", confirmed: 12, created_at: now }];
+  const incidents = [{ id: "i1", type: "jam", x: 220, y: 130, road: "Bd Latrille", severity: "blocked", confirmed: 12, created_at: now, trust: { score: 88, label: "Très fiable", reasons: ["12 confirmations de la communauté"] }, cluster: { size: 1, member_ids: ["i1"], total_confirmed: 12 } }];
   const posts = [
     { id: "p1", author: { name: "Aya K.", handle: "@aya_abj", avatar: "AK", verified: true, badge: "Contributeur Or" }, location: "Cocody, Riviera 3", type: "jam", severity: "blocked", text: "Bouchon monstre.", image: null, likes: 142, comments: 1, shares: 34, confirmed: 18, created_at: now },
   ];
@@ -73,6 +75,8 @@ beforeEach(() => {
   api.register.mockResolvedValue({ access_token: "t", user: fakeUser });
   api.suggestPlaces.mockResolvedValue([]);
   api.scanRoute.mockResolvedValue({ from: {}, to: {}, distance_km: 1, duration_min: 1, route: [], alerts: [], severe_count: 0, reroute: null, recommendation: null, historical_risk_zones: [] });
+  api.classifyIncident.mockResolvedValue({ type: "accident", severity: "blocked", confidence: 0.8, source: "ai" });
+  api.classifyIncidentImage.mockResolvedValue({ type: "flood", severity: "danger", confidence: 0.9, source: "ai" });
   api.municipalDashboard.mockResolvedValue({
     generated_at: now,
     citywide: { total_reports: 12, active_incidents: 3, risk_zones: 1 },
@@ -169,6 +173,21 @@ test("PostDetail renders comments for a known post", async () => {
 test("Report renders the first step", () => {
   renderAt("/signaler", <Route path="/signaler" element={<Report />} />);
   expect(screen.getByText("Signaler un incident")).toBeInTheDocument();
+});
+
+test("Report's AI assist pre-selects the type from a free-text description", async () => {
+  renderAt("/signaler", <Route path="/signaler" element={<Report />} />);
+  fireEvent.change(screen.getByPlaceholderText(/un camion/i), {
+    target: { value: "un camion s'est couché après le pont" },
+  });
+  fireEvent.click(screen.getByText(/Analyser le texte/));
+
+  // classifyIncident returns accident/blocked -> Continuer becomes enabled
+  // (a type is now selected) and step 2 shows the detected severity.
+  await screen.findByText(/pré-rempli/i);
+  expect(api.classifyIncident).toHaveBeenCalledWith("un camion s'est couché après le pont");
+  fireEvent.click(screen.getByText("Continuer"));
+  expect(await screen.findByText("2. Quel est le niveau ?")).toBeInTheDocument();
 });
 
 test("Report lets a user tag which transport modes are affected", async () => {

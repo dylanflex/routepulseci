@@ -36,6 +36,8 @@ export const api = {
   roadConditions: () => request("/road-conditions"),
   riskZones: () => request("/risk-zones"),
   municipalDashboard: () => request("/admin/dashboard"),
+  classifyIncident: (text) => request("/incidents/classify", { method: "POST", body: JSON.stringify({ text }) }),
+  classifyIncidentImage: (image) => request("/incidents/classify-image", { method: "POST", body: JSON.stringify({ image }) }),
   createIncident: (body) => request("/incidents", { method: "POST", body: JSON.stringify(body) }),
   confirmIncident: (id) => request(`/incidents/${id}/confirm`, { method: "POST" }),
 

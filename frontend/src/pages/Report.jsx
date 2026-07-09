@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { INCIDENT_TYPES, TRAFFIC_LEVELS, TRANSPORT_MODES } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar } from "@/lib/traffic";
-import { Camera, MapPin, Zap, Sparkles, Check, X } from "lucide-react";
+import { Camera, MapPin, Zap, Sparkles, Check, X, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import { useAppData } from "@/context/AppDataContext";
 import { useAuth } from "@/context/AuthContext";
+import { api } from "@/lib/api";
 
 export default function Report() {
   const [step, setStep] = useState(1);
@@ -21,7 +22,11 @@ export default function Report() {
   const [image, setImage] = useState(null);
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
+  const [aiText, setAiText] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiConfidence, setAiConfidence] = useState(null);
   const fileInputRef = useRef(null);
+  const aiPhotoRef = useRef(null);
   const navigate = useNavigate();
   const { submitReport } = useAppData();
   const { user } = useAuth();
@@ -52,6 +57,70 @@ export default function Report() {
       }
       return [...prev, key];
     });
+  };
+
+  // AI assist: turn a free-text description into a pre-selected type + severity.
+  // The result only *pre-fills* the form (the reporter still confirms/adjusts
+  // and taps Continuer), and the note is seeded so nothing is retyped.
+  const analyze = async () => {
+    if (!aiText.trim() || analyzing) return;
+    setAnalyzing(true);
+    try {
+      const res = await api.classifyIncident(aiText);
+      setType(res.type);
+      setSeverity(res.severity);
+      setAiConfidence(res.confidence);
+      if (!note.trim()) setNote(aiText);
+      const label = INCIDENT_TYPES[res.type]?.label || res.type;
+      toast.success(`Détecté : ${label}`, {
+        description: `Vérifie et ajuste si besoin (confiance ${Math.round(res.confidence * 100)}%).`,
+      });
+    } catch (err) {
+      toast.error(err.message || "Analyse impossible, choisis manuellement.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // AI assist from a photo: the picked image is both analysed (Computer Vision
+  // → type/severity) AND kept as the report's attached photo, so one tap does
+  // double duty. Falls back to a manual choice if vision is unavailable.
+  const analyzePhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Format non supporté", { description: "Choisis une image." });
+      return;
+    }
+    if (file.size > 2.5 * 1024 * 1024) {
+      toast.error("Image trop lourde", { description: "Choisis une photo de moins de 2,5 Mo." });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result;
+      setImage(dataUrl); // reuse as the attached photo (step 3)
+      setAnalyzing(true);
+      try {
+        const res = await api.classifyIncidentImage(dataUrl);
+        if (res.source === "unavailable") {
+          toast("Photo ajoutée", { description: "Analyse auto indisponible — choisis le type ci-dessous." });
+          return;
+        }
+        setType(res.type);
+        setSeverity(res.severity);
+        setAiConfidence(res.confidence);
+        const label = INCIDENT_TYPES[res.type]?.label || res.type;
+        toast.success(`Photo analysée : ${label}`, {
+          description: `Vérifie et ajuste si besoin (confiance ${Math.round(res.confidence * 100)}%).`,
+        });
+      } catch (err) {
+        toast.error(err.message || "Analyse impossible, choisis manuellement.");
+      } finally {
+        setAnalyzing(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const submit = async () => {
@@ -109,6 +178,51 @@ export default function Report() {
           </motion.div>
         ) : step === 1 ? (
           <motion.div key="s1" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}>
+            {/* AI assist: describe it in words, let the IA pre-fill type + level */}
+            <div className="mt-6 rounded-2xl border border-primary/20 bg-primary/5 p-3">
+              <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                <Wand2 className="w-3.5 h-3.5 text-primary" /> Décris en une phrase (optionnel)
+              </p>
+              <Textarea
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                placeholder="Ex : un camion s'est couché juste après le pont…"
+                className="mt-2 min-h-[64px] rounded-xl border-border bg-card resize-none text-sm"
+              />
+              <div className="mt-2 flex gap-2">
+                <Button
+                  type="button"
+                  onClick={analyze}
+                  disabled={!aiText.trim() || analyzing}
+                  className="flex-1 h-10 rounded-xl bg-gradient-hero text-primary-foreground shadow-glow disabled:opacity-50"
+                >
+                  <Wand2 className="w-4 h-4 mr-2" /> {analyzing ? "Analyse…" : "Analyser le texte"}
+                </Button>
+                <input
+                  ref={aiPhotoRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={analyzePhoto}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => aiPhotoRef.current?.click()}
+                  disabled={analyzing}
+                  className="h-10 rounded-xl border-primary/30"
+                  aria-label="Analyser une photo"
+                >
+                  <Camera className="w-4 h-4" />
+                </Button>
+              </div>
+              {aiConfidence != null && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  L'IA a pré-rempli le type et le niveau ci-dessous — vérifie et ajuste. Confiance {Math.round(aiConfidence * 100)}%.
+                </p>
+              )}
+            </div>
+
             <p className="mt-6 text-sm font-medium text-foreground">1. Que se passe-t-il ?</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               {Object.entries(INCIDENT_TYPES).map(([key, meta]) => {

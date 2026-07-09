@@ -31,9 +31,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette.middleware.cors import CORSMiddleware
 
 import ai
+import clustering
 import gamification
 import routing
 import seed_data
+import trust
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -617,6 +619,14 @@ class IncidentOut(BaseModel):
     transport_modes: List[str]
     confirmed: int
     confirmed_by_me: bool
+    # Explainable trust score (see trust.compute_trust): {score, label, reasons}.
+    # Optional so a serialize_incident call that doesn't compute it (e.g. the
+    # single-incident response from a confirm toggle) still validates.
+    trust: dict | None = None
+    # Duplicate-merge grouping (see clustering.cluster_incidents): {size,
+    # member_ids, total_confirmed}. Same optional-so-single-serialize-validates
+    # reasoning as trust. size==1 means the incident stands alone.
+    cluster: dict | None = None
     created_at: datetime
 
 
@@ -871,7 +881,12 @@ def compute_municipal_dashboard(all_incidents: Collection[IncidentORM]) -> dict:
     }
 
 
-def serialize_incident(inc: IncidentORM, confirmed_ids: Collection[str] = ()) -> dict:
+def serialize_incident(
+    inc: IncidentORM,
+    confirmed_ids: Collection[str] = (),
+    trust_score: dict | None = None,
+    cluster: dict | None = None,
+) -> dict:
     return {
         "id": inc.id,
         "type": inc.type,
@@ -882,8 +897,64 @@ def serialize_incident(inc: IncidentORM, confirmed_ids: Collection[str] = ()) ->
         "transport_modes": _transport_modes_from_str(inc.transport_modes),
         "confirmed": inc.confirmed,
         "confirmed_by_me": inc.id in confirmed_ids,
+        "trust": trust_score,
+        "cluster": cluster,
         "created_at": inc.created_at,
     }
+
+
+def compute_cluster_map(incidents: Collection[IncidentORM]) -> dict[str, dict]:
+    """{incident_id: {size, member_ids, total_confirmed, representative_id}} so
+    a list endpoint can tell each incident which merge-cluster it belongs to
+    (see clustering.cluster_incidents). A size-1 cluster is a lone incident."""
+    out: dict[str, dict] = {}
+    for cl in clustering.cluster_incidents(incidents):
+        summary = {
+            "size": cl["size"],
+            "member_ids": cl["member_ids"],
+            "total_confirmed": cl["total_confirmed"],
+            "representative_id": cl["representative_id"],
+        }
+        for member_id in cl["member_ids"]:
+            out[member_id] = summary
+    return out
+
+
+def count_corroborations(
+    inc: IncidentORM, all_incidents: Collection[IncidentORM]
+) -> int:
+    """How many OTHER same-type incidents sit within trust.CORROBORATION_RADIUS_M
+    of this one — independent reports of what is probably the same event."""
+    return sum(
+        1
+        for other in all_incidents
+        if other.id != inc.id
+        and other.type == inc.type
+        and routing.haversine_m(inc.lat, inc.lng, other.lat, other.lng)
+        <= trust.CORROBORATION_RADIUS_M
+    )
+
+
+def compute_trust_map(
+    incidents: Collection[IncidentORM], now: datetime | None = None
+) -> dict[str, dict]:
+    """{incident_id: trust dict} for a batch, so a list endpoint scores every
+    incident against the same corroboration set in one pass."""
+    now = now or datetime.now(timezone.utc)
+    out: dict[str, dict] = {}
+    for inc in incidents:
+        created_at = inc.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        age_minutes = max(0.0, (now - created_at).total_seconds() / 60.0)
+        ttl = INCIDENT_TTL_MINUTES.get(inc.type, DEFAULT_INCIDENT_TTL_MINUTES)
+        out[inc.id] = trust.compute_trust(
+            confirmed=inc.confirmed,
+            age_minutes=age_minutes,
+            corroborations=count_corroborations(inc, incidents),
+            ttl_minutes=ttl,
+        )
+    return out
 
 
 async def user_incident_confirm_set(
@@ -1035,10 +1106,15 @@ async def list_incidents(
         select(IncidentORM).order_by(IncidentORM.created_at.desc())
     )
     confirmed_ids = await user_incident_confirm_set(current_user, session)
+    active = [i for i in result.scalars().all() if is_incident_active(i)]
+    # Corroboration and merge-clustering are both scored against the currently-
+    # active set only — a report near an event that expired months ago isn't
+    # corroborated or merged with it.
+    trust_map = compute_trust_map(active)
+    cluster_map = compute_cluster_map(active)
     return [
-        serialize_incident(i, confirmed_ids)
-        for i in result.scalars().all()
-        if is_incident_active(i)
+        serialize_incident(i, confirmed_ids, trust_map.get(i.id), cluster_map.get(i.id))
+        for i in active
     ]
 
 
@@ -1131,6 +1207,32 @@ async def my_stats(
     }
 
 
+class IncidentClassifyInput(BaseModel):
+    text: str
+
+
+class IncidentClassifyImageInput(BaseModel):
+    image: str  # base64 data URL (data:image/...;base64,...)
+
+
+@api_router.post("/incidents/classify")
+async def classify_incident(payload: IncidentClassifyInput):
+    """Suggest a type + severity from a free-text description (see
+    ai.classify_incident_text) so the report form can pre-fill itself. Public
+    and unauthenticated like the other AI helpers — it reads nothing and only
+    returns a suggestion the reporter still confirms. Never persists anything;
+    creating the incident stays the explicit POST /incidents step."""
+    return await ai.classify_incident_text(payload.text)
+
+
+@api_router.post("/incidents/classify-image")
+async def classify_incident_from_image(payload: IncidentClassifyImageInput):
+    """Same as /classify but from a photo (see ai.classify_incident_image).
+    Returns source='unavailable' (no suggestion) when vision can't run — e.g.
+    no ANTHROPIC_API_KEY — rather than guessing from pixels it never saw."""
+    return await ai.classify_incident_image(payload.image)
+
+
 @api_router.post("/incidents", response_model=IncidentOut)
 async def create_incident(
     payload: IncidentCreate, session: AsyncSession = Depends(get_session)
@@ -1192,6 +1294,17 @@ async def risk_zones(session: AsyncSession = Depends(get_session)):
     history, not just what's currently active on the live map."""
     result = await session.execute(select(IncidentORM))
     return compute_risk_zones(result.scalars().all())
+
+
+@api_router.get("/incidents/clusters")
+async def incident_clusters(session: AsyncSession = Depends(get_session)):
+    """Currently-active incidents grouped into merged duplicate clusters
+    (see clustering.cluster_incidents), busiest first — the "don't show the
+    same event 20 times" view. Only active incidents cluster (same TTL filter
+    as GET /incidents)."""
+    result = await session.execute(select(IncidentORM))
+    active = [i for i in result.scalars().all() if is_incident_active(i)]
+    return clustering.cluster_incidents(active)
 
 
 @api_router.get("/admin/dashboard")

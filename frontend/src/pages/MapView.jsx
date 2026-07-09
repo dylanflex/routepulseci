@@ -2,13 +2,13 @@ import React, { useState } from "react";
 import { TrafficMap } from "@/components/routepulse/LazyTrafficMap";
 import { TrafficLegend } from "@/components/routepulse/TrafficLegend";
 import { INCIDENT_TYPES, TRANSPORT_MODES } from "@/lib/mockData";
-import { getIncidentIcon, trafficColorVar, estimateDelayMin } from "@/lib/traffic";
+import { getIncidentIcon, trafficColorVar, estimateDelayMin, TRUST_STYLE } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { MapPin, Clock, Users, Navigation, Share2 } from "lucide-react";
+import { MapPin, Clock, Users, Navigation, Share2, ShieldCheck, Layers } from "lucide-react";
 import { toast } from "sonner";
 
 const FILTERS = [
@@ -132,6 +132,14 @@ export default function MapView() {
                     <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{formatRelativeTime(i.created_at)}</span>
                     <span>·</span>
                     <span className="inline-flex items-center gap-1"><Users className="w-3 h-3" />{i.confirmed} confirm.</span>
+                    {i.cluster?.size > 1 && (
+                      <>
+                        <span>·</span>
+                        <span className="inline-flex items-center gap-1 text-primary font-medium">
+                          <Layers className="w-3 h-3" />{i.cluster.size} groupés
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <Badge variant="outline" className="rounded-full text-[10px] uppercase tracking-wide" style={{ borderColor: trafficColorVar(i.severity, 0.4), color: trafficColorVar(i.severity) }}>
@@ -178,6 +186,35 @@ export default function MapView() {
                     <p className="font-semibold text-sm text-foreground">+{estimateDelayMin(selected.type, selected.severity)} min</p>
                   </div>
                 </div>
+                {selected.trust && (() => {
+                  const style = TRUST_STYLE[selected.trust.label] || TRUST_STYLE["À confirmer"];
+                  return (
+                    <div className="mt-4 rounded-xl p-3" style={{ backgroundColor: style.bg }}>
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center gap-1.5 font-semibold text-sm" style={{ color: style.tone }}>
+                          <ShieldCheck className="w-4 h-4" /> {selected.trust.label}
+                        </span>
+                        <span className="text-xs font-medium" style={{ color: style.tone }}>
+                          Fiabilité {selected.trust.score}/100
+                        </span>
+                      </div>
+                      {selected.trust.reasons?.length > 0 && (
+                        <ul className="mt-1.5 text-xs text-muted-foreground list-disc list-inside space-y-0.5">
+                          {selected.trust.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })()}
+                {selected.cluster?.size > 1 && (
+                  <div className="mt-3 flex items-center gap-2 rounded-xl bg-primary/5 p-3 text-sm">
+                    <Layers className="w-4 h-4 text-primary flex-shrink-0" />
+                    <span className="text-foreground">
+                      <span className="font-semibold">{selected.cluster.size} signalements groupés</span> dans cette zone
+                      {selected.cluster.total_confirmed > 0 && ` · ${selected.cluster.total_confirmed} confirmations cumulées`}. L'IA les traite comme un seul événement.
+                    </span>
+                  </div>
+                )}
                 <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
                   Les utilisateurs à proximité rapportent une {meta.label.toLowerCase()} confirmée. Une déviation par la voie parallèle est conseillée. Rejoins la discussion dans le fil.
                 </p>

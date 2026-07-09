@@ -857,6 +857,138 @@ def test_road_conditions_returns_colored_segments(client):
     assert all(len(pt) == 2 for pt in seg["coords"])
 
 
+# --- Incident classification (AI, keyless fallback in tests) ---------------
+
+
+def test_classify_detects_accident_from_free_text(client):
+    res = client.post(
+        "/api/incidents/classify",
+        json={"text": "Un camion s'est couché juste après le pont, gros choc"},
+    )
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["type"] == "accident"
+    assert data["severity"] in ("blocked", "danger")
+    assert data["source"] == "rules"  # no ANTHROPIC key in the test env
+    assert 0.0 <= data["confidence"] <= 1.0
+
+
+def test_classify_detects_flood_as_danger(client):
+    data = client.post(
+        "/api/incidents/classify",
+        json={"text": "La route est complètement inondée, on ne passe plus"},
+    ).json()
+    assert data["type"] == "flood"
+    assert data["severity"] == "danger"
+
+
+def test_classify_unmatched_text_is_low_confidence(client):
+    data = client.post(
+        "/api/incidents/classify", json={"text": "bonjour tout le monde"}
+    ).json()
+    # No taxonomy keyword -> generic low-confidence suggestion, not a fake fact.
+    assert data["confidence"] <= 0.3
+
+
+def test_classify_empty_text_does_not_error(client):
+    res = client.post("/api/incidents/classify", json={"text": ""})
+    assert res.status_code == 200
+    assert res.json()["confidence"] == 0.0
+
+
+def test_classify_image_without_key_is_unavailable(client):
+    # A 1x1 PNG data URL. No ANTHROPIC key in tests -> no vision -> unavailable
+    # (source flag lets the UI stay silent rather than fabricate a suggestion).
+    tiny_png = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    data = client.post("/api/incidents/classify-image", json={"image": tiny_png}).json()
+    assert data["source"] == "unavailable"
+    assert data["confidence"] == 0.0
+
+
+def test_classify_image_rejects_non_data_url_gracefully(client):
+    res = client.post(
+        "/api/incidents/classify-image", json={"image": "https://example.com/x.jpg"}
+    )
+    assert res.status_code == 200
+    assert res.json()["source"] == "unavailable"
+
+
+# --- Trust engine ----------------------------------------------------------
+
+
+def test_incident_list_exposes_trust_score(client):
+    _create_incident(client, road=f"Rue Trust {uuid.uuid4().hex[:8]}")
+    incidents = client.get("/api/incidents").json()
+    assert incidents, "expected at least one active incident"
+    trust = incidents[0]["trust"]
+    assert trust is not None
+    assert 0 <= trust["score"] <= 100
+    assert trust["label"]
+    assert isinstance(trust["reasons"], list)
+
+
+def test_lone_fresh_report_is_not_marked_reliable(client):
+    road = f"Rue Trust {uuid.uuid4().hex[:8]}"
+    created = _create_incident(client, road=road, lat=5.30, lng=-3.95)
+    incidents = client.get("/api/incidents").json()
+    mine = next(i for i in incidents if i["id"] == created["id"])
+    # A single unconfirmed report must not read as trusted — the anti-spam case.
+    assert mine["trust"]["label"] in ("À confirmer", "Peu crédible")
+
+
+def test_confirming_an_incident_raises_its_trust(client):
+    road = f"Rue Trust {uuid.uuid4().hex[:8]}"
+    created = _create_incident(client, road=road, lat=5.31, lng=-3.96)
+    before = next(
+        i for i in client.get("/api/incidents").json() if i["id"] == created["id"]
+    )["trust"]["score"]
+
+    reporter, _, _ = register(client)
+    client.post(f"/api/incidents/{created['id']}/confirm", headers=reporter)
+
+    after = next(
+        i for i in client.get("/api/incidents").json() if i["id"] == created["id"]
+    )["trust"]["score"]
+    assert after > before
+
+
+# --- Duplicate merge clustering --------------------------------------------
+
+
+def test_nearby_same_type_incidents_are_grouped(client):
+    road = f"Rue Cluster {uuid.uuid4().hex[:8]}"
+    ids = []
+    for k in range(3):
+        # Three accidents within ~100 m of each other (0.001 deg ≈ 111 m).
+        inc = _create_incident(
+            client, type="accident", road=road, lat=5.360 + k * 0.0008, lng=-4.005
+        )
+        ids.append(inc["id"])
+
+    incidents = client.get("/api/incidents").json()
+    mine = next(i for i in incidents if i["id"] == ids[0])
+    assert mine["cluster"]["size"] >= 3
+    assert set(ids).issubset(set(mine["cluster"]["member_ids"]))
+
+
+def test_clusters_endpoint_lists_merged_groups(client):
+    road = f"Rue Cluster {uuid.uuid4().hex[:8]}"
+    ids = [
+        _create_incident(
+            client, type="flood", road=road, lat=5.370 + k * 0.0008, lng=-3.990
+        )["id"]
+        for k in range(3)
+    ]
+    clusters = client.get("/api/incidents/clusters").json()
+    group = next(c for c in clusters if set(ids).issubset(set(c["member_ids"])))
+    assert group["size"] >= 3
+    assert group["type"] == "flood"
+    assert group["representative_id"] in ids
+
+
 # --- Historical risk zones -------------------------------------------------
 
 

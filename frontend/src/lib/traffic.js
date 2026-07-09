@@ -13,6 +13,15 @@ export const RECO_STYLE = {
   avoid: { icon: Ban, tone: "#e0432c", bg: "rgba(224,67,44,0.10)" },
 };
 
+// Trust engine (backend trust.py) label → badge styling. Keyed by the exact
+// French label the backend returns so a new tier only needs adding here.
+export const TRUST_STYLE = {
+  "Très fiable": { tone: "#2fb56b", bg: "rgba(47,181,107,0.12)" },
+  "Fiable": { tone: "#3b82f6", bg: "rgba(59,130,246,0.12)" },
+  "À confirmer": { tone: "#f59e0b", bg: "rgba(245,158,11,0.12)" },
+  "Peu crédible": { tone: "#e0432c", bg: "rgba(224,67,44,0.12)" },
+};
+
 export const trafficColorVar = (level, opacity) =>
   opacity != null ? `hsl(var(--traffic-${level}) / ${opacity})` : `hsl(var(--traffic-${level}))`;
 
