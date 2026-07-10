@@ -21,7 +21,8 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional, Tuple
+import time
+from typing import Any, List, Optional, Tuple
 
 import httpx
 from dotenv import load_dotenv
@@ -35,6 +36,21 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 GRAPHHOPPER_KEY = os.environ.get("GRAPHHOPPER_API_KEY", "")
 GRAPHHOPPER_BASE = "https://graphhopper.com/api/1"
+
+# Fallback geocoding/routing providers, tried in order AFTER GraphHopper when it
+# 429s or fails (see the provider chain below). Keys come from .env; an empty
+# key disables that provider. This is why a dead GraphHopper quota no longer
+# kills "avant de partir" — the chain rotates to the next service, then to the
+# offline gazetteer/straight-line as the final safety net.
+GEOAPIFY_KEY = os.environ.get("GEOAPIFY_API_KEY", "")
+ORS_KEY = os.environ.get("ORS_API_KEY", "")
+LOCATIONIQ_KEY = os.environ.get("LOCATIONIQ_API_KEY", "")
+
+# A provider that answers 402/403/429 (quota/forbidden) is parked for this long
+# so we stop hammering it — and stop paying its latency — for the rest of the
+# window instead of re-hitting it on every call.
+PROVIDER_COOLDOWN_S = 900.0
+_PROVIDER_COOLDOWN: dict[str, float] = {}
 
 # Incidents within this distance of the route line count as "on your path".
 CORRIDOR_BUFFER_M = 300.0
@@ -207,6 +223,429 @@ def _hit_label(hit: dict) -> str:
     return name
 
 
+# --- Provider chain ------------------------------------------------------
+#
+# geocode / suggest / route each try the configured providers in order (see
+# _providers), skipping any on cooldown, and only fall back to the offline
+# gazetteer / straight line when every provider is unavailable. Each adapter
+# returns the normalized shape ({name,lat,lng}, a list of those, or
+# {route,distance_m,duration_min}) — or None when it simply has no result. The
+# runner turns a 402/403/429 into a cooldown and moves on, and wraps every
+# adapter so a single broken/absent provider can never break the chain.
+
+
+def _flatten_line(geom: dict) -> list:
+    """LineString / MultiLineString coordinates -> a flat [[lng,lat], ...]."""
+    coords = geom.get("coordinates") or []
+    if geom.get("type") == "MultiLineString":
+        return [pt for seg in coords for pt in seg]
+    return coords
+
+
+# GraphHopper
+async def _gh_geocode(key, query, client):
+    r = await client.get(
+        f"{GRAPHHOPPER_BASE}/geocode",
+        params={
+            "q": query,
+            "locale": "fr",
+            "limit": 5,
+            "point": GEOCODE_BIAS_POINT,
+            "location_bias_scale": 100,
+            "key": key,
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    for hit in r.json().get("hits") or []:
+        pt = hit.get("point") or {}
+        if "lat" in pt and "lng" in pt and in_ci_bounds(pt["lat"], pt["lng"]):
+            return {
+                "name": hit.get("name") or query,
+                "lat": pt["lat"],
+                "lng": pt["lng"],
+            }
+    return None
+
+
+async def _gh_suggest(key, query, client):
+    r = await client.get(
+        f"{GRAPHHOPPER_BASE}/geocode",
+        params={
+            "q": query,
+            "locale": "fr",
+            "limit": 10,
+            "point": GEOCODE_BIAS_POINT,
+            "location_bias_scale": 100,
+            "key": key,
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    out = []
+    for hit in r.json().get("hits") or []:
+        pt = hit.get("point") or {}
+        if "lat" in pt and "lng" in pt and in_ci_bounds(pt["lat"], pt["lng"]):
+            out.append(
+                {"name": _hit_label(hit) or query, "lat": pt["lat"], "lng": pt["lng"]}
+            )
+    return out[:6] or None
+
+
+async def _gh_route(key, points, client):
+    r = await client.post(
+        f"{GRAPHHOPPER_BASE}/route",
+        params={"key": key},
+        json={
+            "profile": "car",
+            "points": [[p["lng"], p["lat"]] for p in points],
+            "points_encoded": False,
+            "instructions": False,
+        },
+        timeout=12.0,
+    )
+    r.raise_for_status()
+    paths = r.json().get("paths") or []
+    if not paths:
+        return None
+    p = paths[0]
+    coords = p.get("points", {}).get("coordinates") or []
+    if len(coords) < 2:
+        return None
+    return {
+        "route": coords,
+        "distance_m": p["distance"],
+        "duration_min": p["time"] / 60000.0,
+    }
+
+
+# Geoapify
+_GEOAPIFY = "https://api.geoapify.com/v1"
+_BIAS = f"proximity:{ABIDJAN_CENTER[1]},{ABIDJAN_CENTER[0]}"
+
+
+async def _geoapify_geocode(key, query, client):
+    r = await client.get(
+        f"{_GEOAPIFY}/geocode/search",
+        params={
+            "text": query,
+            "lang": "fr",
+            "limit": 5,
+            "filter": "countrycode:ci",
+            "bias": _BIAS,
+            "apiKey": key,
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    for f in r.json().get("features") or []:
+        pr = f.get("properties") or {}
+        lat, lng = pr.get("lat"), pr.get("lon")
+        if lat is not None and lng is not None and in_ci_bounds(lat, lng):
+            return {"name": pr.get("formatted") or query, "lat": lat, "lng": lng}
+    return None
+
+
+async def _geoapify_suggest(key, query, client):
+    r = await client.get(
+        f"{_GEOAPIFY}/geocode/autocomplete",
+        params={
+            "text": query,
+            "lang": "fr",
+            "limit": 8,
+            "filter": "countrycode:ci",
+            "bias": _BIAS,
+            "apiKey": key,
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    out = []
+    for f in r.json().get("features") or []:
+        pr = f.get("properties") or {}
+        lat, lng = pr.get("lat"), pr.get("lon")
+        if lat is not None and lng is not None and in_ci_bounds(lat, lng):
+            out.append({"name": pr.get("formatted") or query, "lat": lat, "lng": lng})
+    return out[:6] or None
+
+
+async def _geoapify_route(key, points, client):
+    wp = "|".join(f"{p['lat']},{p['lng']}" for p in points)
+    r = await client.get(
+        f"{_GEOAPIFY}/routing",
+        params={"waypoints": wp, "mode": "drive", "apiKey": key},
+        timeout=12.0,
+    )
+    r.raise_for_status()
+    feats = r.json().get("features") or []
+    if not feats:
+        return None
+    pr = feats[0].get("properties") or {}
+    coords = _flatten_line(feats[0].get("geometry") or {})
+    if len(coords) < 2:
+        return None
+    return {
+        "route": coords,
+        "distance_m": pr.get("distance", 0.0),
+        "duration_min": pr.get("time", 0.0) / 60.0,
+    }
+
+
+# OpenRouteService
+_ORS = "https://api.openrouteservice.org"
+
+
+async def _ors_geocode(key, query, client):
+    r = await client.get(
+        f"{_ORS}/geocode/search",
+        params={
+            "api_key": key,
+            "text": query,
+            "boundary.country": "CIV",
+            "size": 5,
+            "focus.point.lon": ABIDJAN_CENTER[1],
+            "focus.point.lat": ABIDJAN_CENTER[0],
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    for f in r.json().get("features") or []:
+        c = (f.get("geometry") or {}).get("coordinates") or []
+        if len(c) >= 2 and in_ci_bounds(c[1], c[0]):
+            return {
+                "name": (f.get("properties") or {}).get("label") or query,
+                "lat": c[1],
+                "lng": c[0],
+            }
+    return None
+
+
+async def _ors_suggest(key, query, client):
+    r = await client.get(
+        f"{_ORS}/geocode/autocomplete",
+        params={
+            "api_key": key,
+            "text": query,
+            "boundary.country": "CIV",
+            "focus.point.lon": ABIDJAN_CENTER[1],
+            "focus.point.lat": ABIDJAN_CENTER[0],
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    out = []
+    for f in r.json().get("features") or []:
+        c = (f.get("geometry") or {}).get("coordinates") or []
+        if len(c) >= 2 and in_ci_bounds(c[1], c[0]):
+            out.append(
+                {
+                    "name": (f.get("properties") or {}).get("label") or query,
+                    "lat": c[1],
+                    "lng": c[0],
+                }
+            )
+    return out[:6] or None
+
+
+async def _ors_route(key, points, client):
+    r = await client.post(
+        f"{_ORS}/v2/directions/driving-car/geojson",
+        headers={"Authorization": key, "Content-Type": "application/json"},
+        json={"coordinates": [[p["lng"], p["lat"]] for p in points]},
+        timeout=12.0,
+    )
+    r.raise_for_status()
+    feats = r.json().get("features") or []
+    if not feats:
+        return None
+    coords = (feats[0].get("geometry") or {}).get("coordinates") or []
+    summ = (feats[0].get("properties") or {}).get("summary") or {}
+    if len(coords) < 2:
+        return None
+    return {
+        "route": coords,
+        "distance_m": summ.get("distance", 0.0),
+        "duration_min": summ.get("duration", 0.0) / 60.0,
+    }
+
+
+# LocationIQ
+_LIQ = "https://us1.locationiq.com/v1"
+
+
+async def _liq_geocode(key, query, client):
+    r = await client.get(
+        f"{_LIQ}/search",
+        params={
+            "key": key,
+            "q": query,
+            "format": "json",
+            "limit": 5,
+            "countrycodes": "ci",
+            "accept-language": "fr",
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, list):
+        return None
+    for it in data:
+        lat, lng = float(it["lat"]), float(it["lon"])
+        if in_ci_bounds(lat, lng):
+            return {
+                "name": (it.get("display_name") or query).split(",")[0],
+                "lat": lat,
+                "lng": lng,
+            }
+    return None
+
+
+async def _liq_suggest(key, query, client):
+    r = await client.get(
+        f"{_LIQ}/autocomplete",
+        params={
+            "key": key,
+            "q": query,
+            "limit": 8,
+            "countrycodes": "ci",
+            "accept-language": "fr",
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, list):
+        return None
+    out = []
+    for it in data:
+        lat, lng = float(it["lat"]), float(it["lon"])
+        if in_ci_bounds(lat, lng):
+            out.append(
+                {
+                    "name": (it.get("display_name") or query).split(",")[0],
+                    "lat": lat,
+                    "lng": lng,
+                }
+            )
+    return out[:6] or None
+
+
+async def _liq_route(key, points, client):
+    path = ";".join(f"{p['lng']},{p['lat']}" for p in points)
+    r = await client.get(
+        f"{_LIQ}/directions/driving/{path}",
+        params={"key": key, "overview": "full", "geometries": "geojson"},
+        timeout=12.0,
+    )
+    r.raise_for_status()
+    routes = r.json().get("routes") or []
+    if not routes:
+        return None
+    coords = (routes[0].get("geometry") or {}).get("coordinates") or []
+    if len(coords) < 2:
+        return None
+    return {
+        "route": coords,
+        "distance_m": routes[0].get("distance", 0.0),
+        "duration_min": routes[0].get("duration", 0.0) / 60.0,
+    }
+
+
+def _provider_available(name: str) -> bool:
+    return _PROVIDER_COOLDOWN.get(name, 0.0) <= time.monotonic()
+
+
+def _cooldown_provider(name: str) -> None:
+    _PROVIDER_COOLDOWN[name] = time.monotonic() + PROVIDER_COOLDOWN_S
+
+
+def _providers() -> list:
+    """Ordered provider table, rebuilt per call so monkeypatched keys (tests)
+    and cooldown changes take effect immediately. GraphHopper stays first."""
+    return [
+        {
+            "name": "graphhopper",
+            "key": GRAPHHOPPER_KEY,
+            "geocode": _gh_geocode,
+            "suggest": _gh_suggest,
+            "route": _gh_route,
+        },
+        {
+            "name": "geoapify",
+            "key": GEOAPIFY_KEY,
+            "geocode": _geoapify_geocode,
+            "suggest": _geoapify_suggest,
+            "route": _geoapify_route,
+        },
+        {
+            "name": "ors",
+            "key": ORS_KEY,
+            "geocode": _ors_geocode,
+            "suggest": _ors_suggest,
+            "route": _ors_route,
+        },
+        {
+            "name": "locationiq",
+            "key": LOCATIONIQ_KEY,
+            "geocode": _liq_geocode,
+            "suggest": _liq_suggest,
+            "route": _liq_route,
+        },
+    ]
+
+
+async def _run_chain(kind: str, *args, client) -> Any:
+    """Try each configured, non-cooled provider's `kind` adapter in order;
+    return the first non-empty result, or None so the caller can apply its
+    offline fallback. A 402/403/429 cools the provider off."""
+    if client is None:
+        return None
+    for p in _providers():
+        fn = p.get(kind)
+        if not (p["key"] and fn and _provider_available(p["name"])):
+            continue
+        try:
+            result = await fn(p["key"], *args, client)
+            if result:
+                return result
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            if code in (402, 403, 429):
+                logger.warning(
+                    "%s: %s (quota) — cooldown %ds",
+                    p["name"],
+                    code,
+                    int(PROVIDER_COOLDOWN_S),
+                )
+                _cooldown_provider(p["name"])
+            else:
+                logger.warning("%s: HTTP %s", p["name"], code)
+        except Exception as exc:  # never let one provider break the chain
+            logger.warning("%s failed: %s", p["name"], exc)
+    return None
+
+
+async def _route(points: List[dict], client: httpx.AsyncClient) -> Optional[dict]:
+    """Provider-chain routing through the given waypoints (2 for a direct route,
+    3 with a via-point for a detour). None when no provider could route."""
+    return await _run_chain("route", points, client=client)
+
+
+def _gazetteer_geocode(query: str) -> dict:
+    """Offline geocode fallback: match the query against the Abidjan gazetteer,
+    else the city centre. The final safety net when every provider is down."""
+    lowered = (query or "").lower()
+    for key, (lat, lng) in ABIDJAN_GAZETTEER.items():
+        if key in lowered:
+            return {"name": query or key.title(), "lat": lat, "lng": lng}
+    return {
+        "name": query or "Abidjan",
+        "lat": ABIDJAN_CENTER[0],
+        "lng": ABIDJAN_CENTER[1],
+    }
+
+
 # Place-name -> resolved location is effectively static (Abidjan streets don't
 # move), so cache both lookups by normalized query text, same reasoning as
 # _ROAD_SEGMENT_CACHE below. Without this, the same handful of common place
@@ -232,50 +671,12 @@ async def geocode(query: str, client: httpx.AsyncClient) -> dict:
     if cached is not None:
         return cached
 
-    result = None
-    if GRAPHHOPPER_KEY:
-        try:
-            r = await client.get(
-                f"{GRAPHHOPPER_BASE}/geocode",
-                params={
-                    "q": query,
-                    "locale": "fr",
-                    "limit": 5,
-                    "point": GEOCODE_BIAS_POINT,
-                    "location_bias_scale": 100,
-                    "key": GRAPHHOPPER_KEY,
-                },
-                timeout=8.0,
-            )
-            r.raise_for_status()
-            hits = r.json().get("hits") or []
-            # First hit inside Côte d'Ivoire (bias may still rank a namesake first).
-            for hit in hits:
-                pt = hit.get("point") or {}
-                if "lat" in pt and "lng" in pt and in_ci_bounds(pt["lat"], pt["lng"]):
-                    result = {
-                        "name": hit.get("name") or query,
-                        "lat": pt["lat"],
-                        "lng": pt["lng"],
-                    }
-                    break
-            # No Ivorian match — fall through to the local gazetteer below.
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            logger.warning("GraphHopper geocode failed for %r: %s", query, exc)
-            # fall through to the gazetteer
-
+    # Try each provider in turn (GraphHopper → Geoapify → ORS → LocationIQ),
+    # then the offline gazetteer. Result cached so the same place name never
+    # costs a second lookup this process lifetime.
+    result = await _run_chain("geocode", query, client=client)
     if result is None:
-        lowered = query.lower()
-        for key, (lat, lng) in ABIDJAN_GAZETTEER.items():
-            if key in lowered:
-                result = {"name": query or key.title(), "lat": lat, "lng": lng}
-                break
-    if result is None:
-        result = {
-            "name": query or "Abidjan",
-            "lat": ABIDJAN_CENTER[0],
-            "lng": ABIDJAN_CENTER[1],
-        }
+        result = _gazetteer_geocode(query)
 
     _GEOCODE_CACHE[cache_key] = result
     return result
@@ -297,41 +698,7 @@ async def suggest(query: str, client: httpx.AsyncClient) -> List[dict]:
     if cached is not None:
         return cached
 
-    result: List[dict] | None = None
-    if GRAPHHOPPER_KEY:
-        try:
-            r = await client.get(
-                f"{GRAPHHOPPER_BASE}/geocode",
-                params={
-                    "q": query,
-                    "locale": "fr",
-                    "limit": 10,
-                    "point": GEOCODE_BIAS_POINT,
-                    "location_bias_scale": 100,
-                    "key": GRAPHHOPPER_KEY,
-                },
-                timeout=8.0,
-            )
-            r.raise_for_status()
-            out = []
-            for hit in r.json().get("hits") or []:
-                pt = hit.get("point") or {}
-                # Keep only Ivorian candidates so the autocomplete never offers
-                # a foreign namesake the router can't reach.
-                if "lat" in pt and "lng" in pt and in_ci_bounds(pt["lat"], pt["lng"]):
-                    out.append(
-                        {
-                            "name": _hit_label(hit) or query,
-                            "lat": pt["lat"],
-                            "lng": pt["lng"],
-                        }
-                    )
-            if out:
-                result = out[:6]
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            logger.warning("GraphHopper suggest failed for %r: %s", query, exc)
-            # fall through to the gazetteer
-
+    result = await _run_chain("suggest", query, client=client)
     if result is None:
         lowered = query.lower()
         result = [
@@ -354,40 +721,6 @@ def _straight_line_route(a: dict, b: dict) -> dict:
         "distance_m": dist,
         "duration_min": dist / 1000.0 / FALLBACK_SPEED_KMH * 60.0,
     }
-
-
-async def _graphhopper_route(
-    points: List[dict], client: httpx.AsyncClient
-) -> Optional[dict]:
-    """Standard (contraction-hierarchies) route through the given waypoints.
-    Works on GraphHopper's free plan — no flexible/custom-model mode."""
-    body = {
-        "profile": "car",
-        "points": [[p["lng"], p["lat"]] for p in points],
-        "points_encoded": False,
-        "instructions": False,
-    }
-    try:
-        r = await client.post(
-            f"{GRAPHHOPPER_BASE}/route",
-            params={"key": GRAPHHOPPER_KEY},
-            json=body,
-            timeout=12.0,
-        )
-        r.raise_for_status()
-        paths = r.json().get("paths") or []
-        if not paths:
-            return None
-        p = paths[0]
-        coords = p.get("points", {}).get("coordinates") or []
-        return {
-            "route": coords,
-            "distance_m": p["distance"],
-            "duration_min": p["time"] / 60000.0,
-        }
-    except (httpx.HTTPError, KeyError, ValueError) as exc:
-        logger.warning("GraphHopper route failed: %s", exc)
-        return None
 
 
 # Perpendicular offsets (metres) tried on each side of the obstacle. A single
@@ -427,11 +760,8 @@ def _count_severe_on_route(route: List[List[float]], severe: List[dict]) -> int:
 
 
 async def compute_route(a: dict, b: dict, client: httpx.AsyncClient) -> dict:
-    if GRAPHHOPPER_KEY:
-        gh = await _graphhopper_route([a, b], client)
-        if gh:
-            return gh
-    return _straight_line_route(a, b)
+    res = await _route([a, b], client)
+    return res or _straight_line_route(a, b)
 
 
 async def compute_reroute(
@@ -439,10 +769,10 @@ async def compute_reroute(
 ) -> Optional[dict]:
     """An alternative that steers around the severe incidents, if it helps.
 
-    The free GraphHopper plan can't use custom-model area avoidance, so we route
+    Free routing plans can't use custom-model area avoidance, so we route
     through a via-point offset to the side of the worst incident and keep the
     candidate that clears the most severe zones."""
-    if not (GRAPHHOPPER_KEY and severe):
+    if not severe:
         return None
 
     obstacle = severe[0]  # first severe incident along the route
@@ -450,9 +780,7 @@ async def compute_reroute(
     vias = _detour_waypoints(a, b, obstacle)
     # Evaluate all detour candidates concurrently rather than serially — the
     # wider search would otherwise stack several round trips onto every scan.
-    alts = await asyncio.gather(
-        *(_graphhopper_route([a, via, b], client) for via in vias)
-    )
+    alts = await asyncio.gather(*(_route([a, via, b], client) for via in vias))
     best = None  # (severe_remaining, duration_min, alt)
     for alt in alts:
         if not alt or len(alt["route"]) < 2:
@@ -506,9 +834,7 @@ async def road_segment_for_incident(
     b = {"lat": lat - un * span_m / mpd_lat, "lng": lng - ue * span_m / mpd_lng}
     straight = [[a["lng"], a["lat"]], [lng, lat], [b["lng"], b["lat"]]]
 
-    if not GRAPHHOPPER_KEY:
-        return straight
-    r = await _graphhopper_route([a, b], client)
+    r = await _route([a, b], client)
     # Reject a big detour (snap points landed on different roads) — keep it tight.
     if r and len(r["route"]) >= 2 and r["distance_m"] <= 5 * span_m:
         return r["route"]

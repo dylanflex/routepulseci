@@ -25,6 +25,11 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_DB_PATH}"
 # False), so these empty values win.
 os.environ["GRAPHHOPPER_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
+# Fallback geocoding/routing providers, likewise forced off so the provider
+# chain (routing.py) stays fully offline in tests.
+os.environ["GEOAPIFY_API_KEY"] = ""
+os.environ["ORS_API_KEY"] = ""
+os.environ["LOCATIONIQ_API_KEY"] = ""
 
 import pytest
 from fastapi.testclient import TestClient

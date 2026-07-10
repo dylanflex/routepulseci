@@ -6,10 +6,25 @@ no external services required.
 """
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-import routing
+import httpx
+
+# Force every provider key off before importing routing so the provider chain
+# stays offline here regardless of a local .env (routing loads it with
+# override=False, so these process values win). Individual tests monkeypatch
+# routing.GRAPHHOPPER_KEY when they want to exercise a provider path.
+for _k in (
+    "GRAPHHOPPER_API_KEY",
+    "GEOAPIFY_API_KEY",
+    "ORS_API_KEY",
+    "LOCATIONIQ_API_KEY",
+):
+    os.environ[_k] = ""
+
+import routing  # noqa: E402
 
 
 def make_incident(
@@ -136,6 +151,7 @@ def test_geocode_caches_by_normalized_query(monkeypatch):
     # daily quota (see routing._GEOCODE_CACHE).
     monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "fake-key")
     routing._GEOCODE_CACHE.clear()
+    routing._PROVIDER_COOLDOWN.clear()
     client = _CountingClient(
         {"hits": [{"name": "Cocody", "point": {"lat": 5.34, "lng": -3.98}}]}
     )
@@ -148,9 +164,66 @@ def test_geocode_caches_by_normalized_query(monkeypatch):
     assert first == second == third
 
 
+def test_provider_chain_rotates_to_next_service_on_429(monkeypatch):
+    # The whole point of the chain: when GraphHopper is quota-exhausted (429),
+    # geocoding falls through to the next provider and parks GraphHopper on
+    # cooldown instead of failing or dropping straight to the offline gazetteer.
+    routing._GEOCODE_CACHE.clear()
+    routing._PROVIDER_COOLDOWN.clear()
+    monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "k1")
+    monkeypatch.setattr(routing, "GEOAPIFY_KEY", "k2")
+    monkeypatch.setattr(routing, "ORS_KEY", "")
+    monkeypatch.setattr(routing, "LOCATIONIQ_KEY", "")
+
+    req = httpx.Request("GET", "https://graphhopper.com")
+
+    async def gh_429(key, query, client):
+        raise httpx.HTTPStatusError(
+            "quota", request=req, response=httpx.Response(429, request=req)
+        )
+
+    async def geoapify_ok(key, query, client):
+        return {"name": "Cocody (geoapify)", "lat": 5.34, "lng": -3.98}
+
+    monkeypatch.setattr(routing, "_gh_geocode", gh_429)
+    monkeypatch.setattr(routing, "_geoapify_geocode", geoapify_ok)
+
+    # client just needs to be non-None; the mocked adapters don't touch it.
+    got = asyncio.run(routing.geocode("Cocody", client=object()))
+    assert got["name"] == "Cocody (geoapify)"
+    assert "graphhopper" in routing._PROVIDER_COOLDOWN  # parked after the 429
+
+
+def test_provider_on_cooldown_is_skipped(monkeypatch):
+    routing._GEOCODE_CACHE.clear()
+    routing._PROVIDER_COOLDOWN.clear()
+    monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "k1")
+    monkeypatch.setattr(routing, "GEOAPIFY_KEY", "k2")
+    monkeypatch.setattr(routing, "ORS_KEY", "")
+    monkeypatch.setattr(routing, "LOCATIONIQ_KEY", "")
+    routing._cooldown_provider("graphhopper")  # pretend it just 429'd
+
+    called = {"gh": False}
+
+    async def gh_should_not_run(key, query, client):
+        called["gh"] = True
+        return {"name": "nope", "lat": 5.0, "lng": -4.0}
+
+    async def geoapify_ok(key, query, client):
+        return {"name": "Cocody (geoapify)", "lat": 5.34, "lng": -3.98}
+
+    monkeypatch.setattr(routing, "_gh_geocode", gh_should_not_run)
+    monkeypatch.setattr(routing, "_geoapify_geocode", geoapify_ok)
+
+    got = asyncio.run(routing.geocode("Cocody", client=object()))
+    assert got["name"] == "Cocody (geoapify)"
+    assert called["gh"] is False  # skipped while on cooldown
+
+
 def test_suggest_caches_by_normalized_query(monkeypatch):
     monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "fake-key")
     routing._SUGGEST_CACHE.clear()
+    routing._PROVIDER_COOLDOWN.clear()
     client = _CountingClient(
         {"hits": [{"name": "Plateau", "point": {"lat": 5.324, "lng": -4.024}}]}
     )
