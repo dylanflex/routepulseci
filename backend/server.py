@@ -33,6 +33,8 @@ from starlette.middleware.cors import CORSMiddleware
 import ai
 import clustering
 import gamification
+import intelligence
+import prediction
 import routing
 import seed_data
 import trust
@@ -40,12 +42,19 @@ import trust
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-# SQLite database (local file, zero server setup). Override with DATABASE_URL
-# to point at Postgres/MySQL etc. later without touching the models below.
+# SQLite (local file, zero server setup) is the default. The whole app is
+# DB-agnostic through SQLAlchemy: set DATABASE_URL=postgresql+asyncpg://... to
+# run on PostgreSQL/PostGIS instead, with no model changes (see POSTGRES.md).
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", f"sqlite+aiosqlite:///{ROOT_DIR / 'routepulse.db'}"
 )
-engine = create_async_engine(DATABASE_URL)
+# pool_pre_ping only matters for a networked DB (a managed Postgres can drop idle
+# connections); it's pointless for the local SQLite file, so the default path
+# stays byte-for-byte unchanged and only Postgres opts in.
+_engine_kwargs: dict[str, Any] = {}
+if not DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs["pool_pre_ping"] = True
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 JWT_SECRET_DEFAULT = "dev-secret-change-in-production"
@@ -400,6 +409,36 @@ async def seed_dataset(session: AsyncSession):
         ]
     )
 
+    # Recurring time-of-day patterns: one incident per past day at the pattern's
+    # characteristic hour, so prediction.forecast_risk shows a real morning/
+    # evening peak window instead of a flat "Journée" (see seed_data comment).
+    for (
+        itype,
+        lat,
+        lng,
+        road,
+        severity,
+        confirmed,
+        hour,
+        occurrences,
+    ) in seed_data.RECURRING_PATTERNS:
+        for day in range(1, occurrences + 1):
+            created = (now - timedelta(days=day)).replace(
+                hour=hour, minute=0, second=0, microsecond=0
+            )
+            session.add(
+                IncidentORM(
+                    type=itype,
+                    lat=lat,
+                    lng=lng,
+                    road=road,
+                    severity=severity,
+                    confirmed=confirmed,
+                    transport_modes=_TRANSPORT_MODES_BY_TYPE.get(itype, "voiture"),
+                    created_at=created,
+                )
+            )
+
     for (
         username,
         location,
@@ -472,7 +511,48 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    title="RoutePulse CI API",
+    version="1.0.0",
+    description=(
+        "API publique de RoutePulse CI — la plateforme citoyenne de données "
+        "routières d'Abidjan.\n\n"
+        "**Citoyens** signalent (anonyme, sans compte) ; le signal est fiabilisé "
+        "par croisement (`trust`), dédupliqué (`clusters`), et transformé en "
+        "**produit de données** : zones à risque historiques (`/risk-zones`), "
+        "prévisions spatio-temporelles (`/predictions`), et vues agrégées par "
+        "commune (`/admin/dashboard`) pour les partenaires B2G/B2B.\n\n"
+        "Toutes les données B2B sont agrégées/anonymisées. Documentation "
+        "interactive : `/docs` (Swagger) et `/redoc`."
+    ),
+    openapi_tags=[
+        {
+            "name": "Signalements",
+            "description": "Créer, lister, confirmer, classer (IA) les incidents.",
+        },
+        {
+            "name": "Données & prédiction",
+            "description": "Le produit de données : zones à risque, prévisions, clusters, stats.",
+        },
+        {
+            "name": "Partenaires (B2G/B2B)",
+            "description": "Vues agrégées par commune pour villes, assureurs, flottes.",
+        },
+        {
+            "name": "Itinéraire & copilote",
+            "description": "« Avant de partir » et l'assistant IA conversationnel.",
+        },
+        {
+            "name": "Communauté",
+            "description": "Fil social, commentaires, classement, profils.",
+        },
+        {
+            "name": "Auth & compte",
+            "description": "Inscription, connexion, préférences, modération.",
+        },
+    ],
+)
 api_router = APIRouter(prefix="/api")
 
 
@@ -1294,6 +1374,38 @@ async def risk_zones(session: AsyncSession = Depends(get_session)):
     history, not just what's currently active on the live map."""
     result = await session.execute(select(IncidentORM))
     return compute_risk_zones(result.scalars().all())
+
+
+@api_router.get("/predictions", tags=["Données & prédiction"])
+async def predictions(session: AsyncSession = Depends(get_session)):
+    """Spatio-temporal risk forecast per commune × type (see
+    prediction.forecast_risk) — "que va-t-il probablement se passer, où et
+    quand". Built from the full incident history (like risk-zones), it adds the
+    temporal dimension (peak window), a 0-100 risk score, confidence and trend.
+    Explainable by design: every score ships with its `reasons`."""
+    result = await session.execute(select(IncidentORM))
+    return prediction.forecast_risk(result.scalars().all())
+
+
+@api_router.get("/city-score", tags=["Données & prédiction"])
+async def city_score(session: AsyncSession = Depends(get_session)):
+    """RoutePulse Mobility Intelligence Score — the flagship daily read on the
+    city's mobility health (see intelligence.city_mobility_score): a composite
+    0-100 score + sub-scores computed from the currently-active incidents, the
+    per-commune fluidity ranking, and an explainable economic estimate (hours
+    lost, cost, fuel, CO2) with its assumptions attached."""
+    result = await session.execute(select(IncidentORM))
+    active = [i for i in result.scalars().all() if is_incident_active(i)]
+    return intelligence.city_mobility_score(active)
+
+
+@api_router.get("/predictions/summary", tags=["Données & prédiction"])
+async def predictions_summary(session: AsyncSession = Depends(get_session)):
+    """Citywide headline stats over the forecast (see prediction.forecast_summary)
+    — patterns detected, high-risk count, communes covered, average score,
+    dominant type and the single most-at-risk zone."""
+    result = await session.execute(select(IncidentORM))
+    return prediction.forecast_summary(prediction.forecast_risk(result.scalars().all()))
 
 
 class CopilotInput(BaseModel):

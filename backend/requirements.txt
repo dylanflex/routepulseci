@@ -2,7 +2,8 @@ fastapi==0.110.1
 uvicorn==0.25.0
 python-dotenv>=1.0.1
 sqlalchemy[asyncio]>=2.0.29
-aiosqlite>=0.20.0
+aiosqlite>=0.20.0        # default zero-config DB (SQLite)
+asyncpg>=0.29.0         # PostgreSQL async driver — set DATABASE_URL=postgresql+asyncpg://... to switch (see POSTGRES.md)
 pydantic>=2.6.4
 tzdata>=2024.2
 bcrypt>=4.1.3

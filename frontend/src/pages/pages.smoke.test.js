@@ -31,6 +31,9 @@ jest.mock("@/lib/api", () => {
       roadConditions: jest.fn(),
       riskZones: jest.fn(),
       municipalDashboard: jest.fn(),
+      predictions: jest.fn(),
+      predictionsSummary: jest.fn(),
+      cityScore: jest.fn(),
       classifyIncident: jest.fn(),
       classifyIncidentImage: jest.fn(),
       copilot: jest.fn(),
@@ -85,6 +88,33 @@ beforeEach(() => {
     citywide: { total_reports: 12, active_incidents: 3, risk_zones: 1 },
     communes: [{ commune: "Cocody", total_reports: 8, active_incidents: 2, risk_zones: 1, top_type: "flood" }],
   });
+  api.predictions.mockResolvedValue([
+    {
+      commune: "Abobo", type: "flood", occurrences: 6, risk_score: 82, risk_level: "élevé",
+      peak_window: "Pointe du matin", peak_share: 0.5, confidence: "élevée", trend: "en hausse",
+      dominant_severity: "danger", span_days: 12, avg_confirmed: 20, last_reported: now,
+      window_distribution: [
+        { window: "Nuit", count: 0, share: 0 },
+        { window: "Pointe du matin", count: 3, share: 0.5 },
+        { window: "Journée", count: 1, share: 0.17 },
+        { window: "Pointe du soir", count: 2, share: 0.33 },
+        { window: "Soirée", count: 0, share: 0 },
+      ],
+      reasons: [],
+    },
+  ]);
+  api.predictionsSummary.mockResolvedValue({
+    patterns: 8, high_risk: 3, communes_covered: 6, avg_score: 61,
+    dominant_type: "jam", top: { commune: "Abobo", type: "flood", risk_score: 82, peak_window: "Pointe du matin" },
+  });
+  api.cityScore.mockResolvedValue({
+    score: 74, label: "Tendue",
+    components: { fluidite: 68, securite: 80, inondations: 72, infrastructure: 90 },
+    active_incidents: 12,
+    economic_estimate: { hours_lost: 18700, cost_fcfa: 247000000, fuel_liters: 185000, co2_kg: 425000, assumptions: ["50 usagers impactés par incident actif"] },
+    commune_fluidity: [{ commune: "Plateau", fluidity: 35, active_incidents: 4 }],
+    updated_at: now,
+  });
   api.moderationQueue.mockResolvedValue([]);
   api.unhidePost.mockResolvedValue({ hidden: false });
 });
@@ -110,6 +140,12 @@ test("MunicipalDashboard renders per-commune aggregates", async () => {
   const commune = await screen.findByText("Cocody");
   expect(screen.getByText("12")).toBeInTheDocument();
   expect(commune.closest("tr")).toHaveTextContent("1 zone");
+  // Predictive layer renders its forecast.
+  expect(await screen.findByText("Prévision de risque")).toBeInTheDocument();
+  expect(screen.getByText("82")).toBeInTheDocument();
+  // Flagship City Mobility Score hero.
+  expect(screen.getByText("74")).toBeInTheDocument();
+  expect(screen.getByText("Mobilité Tendue")).toBeInTheDocument();
 });
 
 test("Login renders the form", () => {

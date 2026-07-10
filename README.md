@@ -52,7 +52,7 @@ Une base `routepulse.db` (SQLite) est créée et pré-remplie automatiquement au
 
 | Variable | Rôle |
 |----------|------|
-| `DATABASE_URL` | Surcharge la base SQLite (ex. Postgres). |
+| `DATABASE_URL` | Surcharge la base SQLite par PostgreSQL/PostGIS (`postgresql+asyncpg://…`) — voir [`backend/POSTGRES.md`](backend/POSTGRES.md). |
 | `CORS_ORIGINS` | Origines autorisées, séparées par des virgules. |
 | `JWT_SECRET` | Secret de signature des tokens (à définir en production). |
 | `GRAPHHOPPER_API_KEY` | Active le géocodage et le routage réels du mode « avant de partir ». Sans clé, un fallback hors-ligne est utilisé. |

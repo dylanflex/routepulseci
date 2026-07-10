@@ -1092,6 +1092,49 @@ def test_scan_route_surfaces_historical_risk_zones_on_corridor(client):
     assert any(z["road"] == road for z in zones)
 
 
+# --- City Mobility Intelligence Score --------------------------------------
+
+
+def test_city_score_endpoint_shape(client):
+    data = client.get("/api/city-score").json()
+    assert 0 <= data["score"] <= 100
+    assert data["label"] in ("Bonne", "Tendue", "Critique")
+    assert set(data["components"]) == {
+        "fluidite",
+        "securite",
+        "inondations",
+        "infrastructure",
+    }
+    assert "cost_fcfa" in data["economic_estimate"]
+    assert data["economic_estimate"]["assumptions"]
+
+
+def test_city_score_reacts_to_active_incidents(client):
+    before = client.get("/api/city-score").json()["economic_estimate"]["hours_lost"]
+    # A fresh active blocked jam adds estimated lost hours.
+    _create_incident(client, type="jam", severity="blocked", road="Bd Score Test")
+    after = client.get("/api/city-score").json()["economic_estimate"]["hours_lost"]
+    assert after >= before
+
+
+# --- Predictions (spatio-temporal forecast) --------------------------------
+
+
+def test_predictions_endpoint_forecasts_recurring_zones(client):
+    # Three floods at the Abobo gazetteer point -> a forecastable pattern.
+    for _ in range(3):
+        _create_incident(client, type="flood", severity="danger", lat=5.42, lng=-4.02)
+    forecast = client.get("/api/predictions").json()
+    abobo = next(
+        f for f in forecast if f["commune"] == "Abobo" and f["type"] == "flood"
+    )
+    assert abobo["occurrences"] >= 3
+    assert 0 <= abobo["risk_score"] <= 100
+    assert abobo["risk_level"] in ("faible", "modéré", "élevé")
+    assert abobo["peak_window"]
+    assert abobo["reasons"]
+
+
 # --- Municipal dashboard (B2G) ----------------------------------------------
 
 

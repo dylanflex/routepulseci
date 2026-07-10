@@ -122,6 +122,29 @@ INCIDENTS = [
     ("accident", 5.3600, -3.9000, "Faya, Carrefour", "blocked", 11, 25),
 ]
 
+# Recurring TIME-OF-DAY patterns for the predictive layer (prediction.py).
+# Unlike INCIDENTS above (which carry an age in minutes), these recur on the
+# SAME stretch at a characteristic LOCAL hour across many past days, so
+# prediction.forecast_risk surfaces a clear peak window (morning vs evening)
+# instead of everything collapsing to "Journée". Abidjan is UTC+0, so the hour
+# below is both the local and the stored-UTC hour. server.seed_dataset expands
+# each into `occurrences` incidents, one per past day at that hour.
+# (type, lat, lng, road, severity, confirmed, hour_local, occurrences)
+RECURRING_PATTERNS = [
+    # Morning commute chokepoints — jams peak 6-8h.
+    ("jam", 5.3350, -4.0350, "Pont FHB (accès Plateau)", "blocked", 26, 7, 9),
+    ("jam", 5.3250, -4.0200, "Bd de la République", "blocked", 21, 8, 7),
+    ("jam", 5.3560, -4.0210, "Carrefour Liberté (Adjamé)", "blocked", 18, 6, 6),
+    # Evening commute — jams + accidents peak 17-19h.
+    ("jam", 5.3350, -4.0350, "Pont FHB (accès Plateau)", "dense", 15, 18, 8),
+    ("accident", 5.3555, -3.9530, "Palmeraie, Carrefour", "danger", 20, 19, 6),
+    ("jam", 5.3450, -4.0800, "Yop Bd Principal", "dense", 13, 18, 6),
+    # Evening floods — Bd Lagunaire backs up after the late-afternoon rains.
+    ("flood", 5.3230, -4.0130, "Bd Lagunaire", "danger", 30, 20, 7),
+    # Late-night potholes hit hardest (unlit, high speed) — peak 22-0h.
+    ("degraded", 5.3600, -4.0180, "Bd Nangui Abrogoua", "blocked", 9, 23, 5),
+]
+
 # Posts: (username, location, type, severity, text, image, likes, shares,
 #         confirmed, age_minutes, [comments])
 # Each comment: (username, text, likes, age_minutes)

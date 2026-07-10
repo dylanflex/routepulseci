@@ -1,0 +1,31 @@
+# Local PostgreSQL + PostGIS for RoutePulse — the "scale-up" database target.
+#
+# The app defaults to zero-config SQLite; this compose file spins up a
+# PostGIS-enabled Postgres so you can run the exact same code on Postgres by
+# pointing DATABASE_URL at it (see POSTGRES.md). Nothing here is required for
+# the demo — it's the documented path to the production database.
+#
+#   docker compose up -d
+#   export DATABASE_URL="postgresql+asyncpg://routepulse:routepulse@localhost:5432/routepulse"
+#   python reseed.py && uvicorn server:app --reload --port 8000
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: routepulse-postgis
+    environment:
+      POSTGRES_USER: routepulse
+      POSTGRES_PASSWORD: routepulse
+      POSTGRES_DB: routepulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - routepulse_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U routepulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  routepulse_pgdata:
