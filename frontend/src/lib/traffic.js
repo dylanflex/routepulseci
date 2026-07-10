@@ -1,7 +1,13 @@
-import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat, ShieldCheck, Ban } from "lucide-react";
+import { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat, ShieldCheck, Ban, Car, Bus, Bike, Footprints, Globe } from "lucide-react";
 import { TRAFFIC_LEVELS } from "@/lib/mockData";
 
-export const INCIDENT_ICONS = { AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat };
+// Name → lucide component. Covers incident types, transport modes and the map
+// filters — the one place icon names are resolved, so a component never hard-
+// codes an emoji. getIncidentIcon falls back to AlertTriangle for unknowns.
+export const INCIDENT_ICONS = {
+  AlertTriangle, Siren, CarFront, Waves, ShieldAlert, HardHat,
+  Car, Bus, Bike, Footprints, Globe,
+};
 
 export const getIncidentIcon = (iconName) => INCIDENT_ICONS[iconName] || AlertTriangle;
 

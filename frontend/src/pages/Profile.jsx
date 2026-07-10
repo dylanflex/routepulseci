@@ -4,7 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { StatChip } from "@/components/routepulse/StatChip";
-import { MapPin, Bell, Settings, Shield, ChevronRight, ShieldCheck, LogOut, Trophy, Sparkles, ShieldAlert } from "lucide-react";
+import { MapPin, Bell, Settings, Shield, ChevronRight, ShieldCheck, LogOut, Trophy, Sparkles, ShieldAlert, Medal } from "lucide-react";
+
+// Gold / silver / bronze for the top-3 leaderboard ranks.
+const MEDAL_COLOR = { 1: "#F59E0B", 2: "#94A3B8", 3: "#B87333" };
 import { useAppData } from "@/context/AppDataContext";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
@@ -133,14 +136,14 @@ export default function Profile() {
           <div className="mt-3 rounded-2xl bg-card border border-border overflow-hidden">
             {leaderboard.map((entry) => {
               const isMe = entry.handle === `@${user.username}`;
-              const medal = entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
+              const medalColor = MEDAL_COLOR[entry.rank];
               return (
                 <div
                   key={entry.handle}
                   className={`flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0 ${isMe ? "bg-primary/5" : ""}`}
                 >
-                  <div className="w-6 text-center font-display font-semibold text-sm text-muted-foreground">
-                    {medal || entry.rank}
+                  <div className="w-6 flex items-center justify-center font-display font-semibold text-sm text-muted-foreground">
+                    {medalColor ? <Medal className="w-4 h-4" style={{ color: medalColor }} /> : entry.rank}
                   </div>
                   <Avatar className="h-9 w-9">
                     <AvatarFallback className="bg-muted text-foreground text-xs font-semibold">{entry.avatar || entry.name.slice(0, 2).toUpperCase()}</AvatarFallback>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
-import { Maximize2, Minimize2, Search, LocateFixed, X, Sparkles, History } from "lucide-react";
+import { Maximize2, Minimize2, Search, LocateFixed, X, Sparkles, History, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PlaceField } from "@/components/routepulse/PlaceField";
 import { VoiceToggle } from "@/components/routepulse/VoiceToggle";
@@ -303,14 +303,16 @@ export const TrafficMap = ({
 
     const visible = incidents.filter((i) => activeFilter === "all" || i.type === activeFilter);
     visible.forEach((incident) => {
-      const meta = INCIDENT_TYPES[incident.type] || { label: incident.type, icon: "AlertTriangle", emoji: "⚠️" };
+      const meta = INCIDENT_TYPES[incident.type] || { label: incident.type, icon: "AlertTriangle" };
 
       const el = document.createElement("button");
       el.className = "routepulse-incident-marker";
       el.style.backgroundColor = trafficColorHex(incident.severity);
       el.setAttribute("aria-label", meta.label);
       if (incident.confirmed >= 5) el.classList.add("animate-pulse-ring");
-      el.innerHTML = `<span>${meta.emoji}</span>`;
+      // Clean colored pin: severity color + white centre dot (no emoji). The
+      // type is conveyed by the tooltip below and the list/detail UI.
+      el.innerHTML = `<span style="width:9px;height:9px;border-radius:9999px;background:#fff;opacity:.95;box-shadow:0 0 0 1px rgba(0,0,0,.06)"></span>`;
       el.addEventListener("click", () => onPickIncident?.(incident));
 
       const tooltip = document.createElement("div");
@@ -468,7 +470,7 @@ export const TrafficMap = ({
               : "bg-card/95 text-foreground border-border hover:border-primary/40"
           }`}
         >
-          <span aria-hidden="true">🧭</span>
+          <Navigation className="w-3.5 h-3.5" />
           {navMode ? "Quitter la nav" : "Navigation"}
         </button>
         {allowFullscreen && (

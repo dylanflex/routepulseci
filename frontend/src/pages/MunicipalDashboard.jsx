@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Landmark, ArrowLeft, MapPin, ShieldAlert, TrendingUp, Building2, Radar, Clock, TrendingDown, Minus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { INCIDENT_TYPES } from "@/lib/mockData";
+import { getIncidentIcon } from "@/lib/traffic";
 import { api } from "@/lib/api";
 
 const TONE_CLASSES = {
@@ -165,6 +166,7 @@ export default function MunicipalDashboard() {
                     <tbody>
                       {dashboard.communes.map((c) => {
                         const meta = c.top_type ? INCIDENT_TYPES[c.top_type] : null;
+                        const TopIcon = meta ? getIncidentIcon(meta.icon) : null;
                         return (
                           <tr key={c.commune} className="border-b border-border/60 last:border-0">
                             <td className="px-5 py-3 font-semibold text-foreground">{c.commune}</td>
@@ -180,7 +182,11 @@ export default function MunicipalDashboard() {
                               )}
                             </td>
                             <td className="px-5 py-3 text-muted-foreground">
-                              {meta ? <>{meta.emoji} {meta.label}</> : "—"}
+                              {meta ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <TopIcon className="w-3.5 h-3.5" /> {meta.label}
+                                </span>
+                              ) : "—"}
                             </td>
                           </tr>
                         );
@@ -242,12 +248,13 @@ export default function MunicipalDashboard() {
                     <tbody>
                       {predictions.map((p, i) => {
                         const meta = INCIDENT_TYPES[p.type];
+                        const PredIcon = getIncidentIcon(meta?.icon);
                         const c = RISK_COLORS[p.risk_level] || RISK_COLORS.faible;
                         return (
                           <tr key={i} className="border-b border-border/60 last:border-0 align-middle">
                             <td className="px-4 py-3">
                               <p className="font-semibold text-foreground flex items-center gap-1.5">
-                                <span>{meta?.emoji || "⚠️"}</span> {p.commune}
+                                <PredIcon className="w-3.5 h-3.5" /> {p.commune}
                               </p>
                               <p className="text-xs text-muted-foreground">{meta?.label || p.type}</p>
                             </td>

@@ -49,7 +49,7 @@ export default function Trajet() {
       const { lat, lng } = await getCurrentPosition();
       setFrom("Ma position");
       setFromSend(`${lat},${lng}`);
-      toast.success("Position récupérée 📍");
+      toast.success("Position récupérée");
     } finally {
       setLocating(false);
     }
@@ -213,7 +213,7 @@ export default function Trajet() {
             </h3>
             {result.alerts.length === 0 ? (
               <p className="mt-3 text-sm text-muted-foreground p-4 rounded-2xl bg-card border border-border">
-                Aucun incident signalé le long de ce trajet. 🎉
+                Aucun incident signalé le long de ce trajet.
               </p>
             ) : (
               <div className="mt-3 space-y-2">

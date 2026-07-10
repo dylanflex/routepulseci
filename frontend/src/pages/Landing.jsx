@@ -17,7 +17,7 @@ import {
   ArrowRight, Zap, ShieldCheck, MapPin, Sparkles, TrendingUp, Clock,
   MessageCircleHeart, Layers, LineChart, Menu, X, Bell, Heart,
   Play, Route as RouteIcon,
-  Camera, Send, Radio, Activity, Trophy
+  Camera, Send, Radio, Activity, Trophy, Medal
 } from "lucide-react";
 import { useState } from "react";
 
@@ -345,7 +345,9 @@ const CommunitySection = () => {
               <div className="mt-4 space-y-3">
                 {topContributors.map((c, i) => (
                   <div key={c.handle} className="flex items-center gap-3">
-                    <span className="text-lg w-6 text-center">{["🥇", "🥈", "🥉"][i]}</span>
+                    <span className="w-6 flex items-center justify-center">
+                      <Medal className="w-4 h-4" style={{ color: ["#F59E0B", "#94A3B8", "#B87333"][i] }} />
+                    </span>
                     <div className="w-9 h-9 rounded-full bg-gradient-hero text-primary-foreground flex items-center justify-center text-xs font-semibold flex-shrink-0">
                       {c.avatar || c.name.slice(0, 2).toUpperCase()}
                     </div>

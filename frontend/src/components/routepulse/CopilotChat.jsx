@@ -11,7 +11,7 @@ const SUGGESTIONS = [
 const GREETING = {
   role: "assistant",
   content:
-    "Salut 👋 Je suis ton copilote RoutePulse. Demande-moi l'état de la route à Abidjan — je me base sur les signalements en direct.",
+    "Bonjour, je suis ton copilote RoutePulse. Demande-moi l'état de la route à Abidjan — je me base sur les signalements en direct.",
 };
 
 export default function CopilotChat() {

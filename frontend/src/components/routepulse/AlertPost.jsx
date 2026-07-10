@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Heart, MessageCircle, Share2, Flag, ShieldCheck, MapPin, MoreHorizontal, Bookmark } from "lucide-react";
 import { INCIDENT_TYPES, TRAFFIC_LEVELS, TRANSPORT_MODES } from "@/lib/mockData";
-import { trafficColorVar } from "@/lib/traffic";
+import { trafficColorVar, getIncidentIcon } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { useAppData } from "@/context/AppDataContext";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +20,8 @@ export const AlertPost = ({ post, compact = false }) => {
   // so the same post stays consistent across the feed, detail and profile.
   const liked = post.liked_by_me;
   const confirmedByMe = post.confirmed_by_me;
-  const meta = INCIDENT_TYPES[post.type] || { label: post.type, icon: "AlertTriangle", emoji: "⚠️" };
+  const meta = INCIDENT_TYPES[post.type] || { label: post.type, icon: "AlertTriangle" };
+  const TypeIcon = getIncidentIcon(meta.icon);
   const severity = TRAFFIC_LEVELS[post.severity] || { label: post.severity, hex: "#94a3b8" };
 
   const handleLike = async () => {
@@ -35,7 +36,7 @@ export const AlertPost = ({ post, compact = false }) => {
     const link = `${window.location.origin}/app/feed/${post.id}`;
     try {
       await navigator.clipboard.writeText(link);
-      toast.success("Lien copié dans le presse-papier", { description: "Partage avec ta communauté 🙌" });
+      toast.success("Lien copié dans le presse-papier", { description: "Partage avec ta communauté." });
     } catch {
       toast.error("Impossible de copier le lien", { description: link });
     }
@@ -54,7 +55,7 @@ export const AlertPost = ({ post, compact = false }) => {
     try {
       await confirmPost(post.id);
       if (!confirmedByMe) {
-        toast.success("Alerte confirmée ✅", { description: "Merci, tu aides à fiabiliser l'info." });
+        toast.success("Alerte confirmée", { description: "Merci, tu aides à fiabiliser l'info." });
       }
     } catch (err) {
       toast.error(err.message || "Confirmation impossible", { description: "Connecte-toi pour confirmer." });
@@ -114,7 +115,7 @@ export const AlertPost = ({ post, compact = false }) => {
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
           style={{ backgroundColor: trafficColorVar(post.severity, 0.12), color: trafficColorVar(post.severity) }}
         >
-          <span className="text-sm leading-none">{meta.emoji}</span>
+          <TypeIcon className="w-3.5 h-3.5" />
           <span>{meta.label}</span>
           <span className="opacity-70">· {severity.label}</span>
         </div>
@@ -132,11 +133,14 @@ export const AlertPost = ({ post, compact = false }) => {
       {/* Who's affected — most Abidjanais move by gbaka/wôrô-wôrô, not just car */}
       {post.transport_modes?.length > 0 && (
         <div className="flex items-center gap-1 px-4 mt-1.5" title="Modes de transport concernés">
-          {post.transport_modes.map((m) => (
-            <span key={m} className="text-xs" title={TRANSPORT_MODES[m]?.label || m}>
-              {TRANSPORT_MODES[m]?.emoji || "❓"}
-            </span>
-          ))}
+          {post.transport_modes.map((m) => {
+            const TIcon = getIncidentIcon(TRANSPORT_MODES[m]?.icon);
+            return (
+              <span key={m} className="text-muted-foreground" title={TRANSPORT_MODES[m]?.label || m}>
+                <TIcon className="w-3.5 h-3.5" />
+              </span>
+            );
+          })}
         </div>
       )}
 

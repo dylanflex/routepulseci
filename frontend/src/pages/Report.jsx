@@ -129,7 +129,7 @@ export default function Report() {
       // Only feed posts carry an image (incidents have no image field).
       await submitReport({ type, severity, note, postToFeed: canPostToFeed, image: canPostToFeed ? image : null, transportModes });
       setSent(true);
-      toast.success("Alerte envoyée ⚡", { description: "Merci, ta ville te remercie !" });
+      toast.success("Alerte envoyée", { description: "Merci, ta ville te remercie !" });
       setTimeout(() => navigate(canPostToFeed ? "/app/feed" : "/app/carte"), 1600);
     } catch (err) {
       toast.error(err.message || "Envoi impossible, réessaie.");
@@ -173,7 +173,7 @@ export default function Report() {
             <p className="mt-1 text-sm text-muted-foreground max-w-xs">
               Ta contribution est visible sur la carte{canPostToFeed ? " et dans le fil" : ""}.
               {/* Matches gamification.POINTS_PER_POST (backend) — keep in sync. */}
-              {canPostToFeed ? " +5 pts 🔥" : ""}
+              {canPostToFeed ? " +5 pts" : ""}
             </p>
           </motion.div>
         ) : step === 1 ? (
@@ -241,7 +241,6 @@ export default function Report() {
                     </div>
                     <div>
                       <p className="font-semibold text-sm">{meta.label}</p>
-                      <p className="text-[11px] text-muted-foreground">{meta.emoji}</p>
                     </div>
                   </button>
                 );
@@ -290,6 +289,7 @@ export default function Report() {
             <div className="mt-2 flex flex-wrap gap-2">
               {Object.entries(TRANSPORT_MODES).map(([key, meta]) => {
                 const active = transportModes.includes(key);
+                const TIcon = getIncidentIcon(meta.icon);
                 return (
                   <button
                     key={key}
@@ -299,7 +299,7 @@ export default function Report() {
                       active ? "border-primary bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:border-foreground/30"
                     }`}
                   >
-                    <span>{meta.emoji}</span> {meta.label}
+                    <TIcon className="w-3.5 h-3.5" /> {meta.label}
                   </button>
                 );
               })}
@@ -366,7 +366,7 @@ export default function Report() {
             <div className="mt-6 flex gap-2">
               <Button variant="outline" onClick={() => setStep(2)} disabled={sending} className="flex-1 h-12 rounded-xl">Retour</Button>
               <Button onClick={submit} disabled={sending} className="flex-1 h-12 rounded-xl bg-gradient-hero text-primary-foreground shadow-glow disabled:opacity-60">
-                {sending ? "Envoi…" : "Envoyer l’alerte ⚡"}
+                {sending ? "Envoi…" : <><Zap className="w-4 h-4 mr-2" /> Envoyer l’alerte</>}
               </Button>
             </div>
           </motion.div>

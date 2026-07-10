@@ -12,13 +12,13 @@ import { MapPin, Clock, Users, Navigation, Share2, ShieldCheck, Layers } from "l
 import { toast } from "sonner";
 
 const FILTERS = [
-  { key: "all", label: "Tout", emoji: "🌐" },
-  { key: "jam", label: "Bouchons", emoji: "🚗" },
-  { key: "accident", label: "Accidents", emoji: "🚧" },
-  { key: "flood", label: "Inondations", emoji: "🌊" },
-  { key: "degraded", label: "Nids de poule", emoji: "🕳️" },
-  { key: "police", label: "Contrôles", emoji: "👮" },
-  { key: "works", label: "Travaux", emoji: "🚜" },
+  { key: "all", label: "Tout", icon: "Globe" },
+  { key: "jam", label: "Bouchons", icon: "CarFront" },
+  { key: "accident", label: "Accidents", icon: "Siren" },
+  { key: "flood", label: "Inondations", icon: "Waves" },
+  { key: "degraded", label: "Nids de poule", icon: "AlertTriangle" },
+  { key: "police", label: "Contrôles", icon: "ShieldAlert" },
+  { key: "works", label: "Travaux", icon: "HardHat" },
 ];
 
 export default function MapView() {
@@ -36,7 +36,7 @@ export default function MapView() {
     try {
       await confirmIncident(selected.id);
       if (!selected.confirmed_by_me) {
-        toast.success("Confirmation envoyée 💪");
+        toast.success("Confirmation envoyée");
       }
     } catch (err) {
       toast.error(err.message || "Confirmation impossible", { description: "Connecte-toi pour confirmer." });
@@ -47,7 +47,7 @@ export default function MapView() {
     const link = `${window.location.origin}/app/carte?lat=${selected.lat}&lng=${selected.lng}`;
     try {
       await navigator.clipboard.writeText(link);
-      toast.success("Lien copié 🔗");
+      toast.success("Lien copié");
     } catch {
       toast.error("Impossible de copier le lien", { description: link });
     }
@@ -68,19 +68,22 @@ export default function MapView() {
       {/* Filters */}
       <div className="mt-3 -mx-4 px-4 overflow-x-auto scrollbar-thin">
         <div className="flex gap-2 pb-2">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                filter === f.key
-                  ? "bg-foreground text-background border-foreground"
-                  : "bg-card text-muted-foreground border-border hover:border-foreground/30"
-              }`}
-            >
-              <span className="mr-1">{f.emoji}</span>{f.label}
-            </button>
-          ))}
+          {FILTERS.map((f) => {
+            const FilterIcon = getIncidentIcon(f.icon);
+            return (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                  filter === f.key
+                    ? "bg-foreground text-background border-foreground"
+                    : "bg-card text-muted-foreground border-border hover:border-foreground/30"
+                }`}
+              >
+                <FilterIcon className="w-3.5 h-3.5" />{f.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -112,7 +115,7 @@ export default function MapView() {
         <div className="mt-3 space-y-2">
           {loading && <p className="text-sm text-muted-foreground text-center py-8">Chargement…</p>}
           {incidents.filter((i) => filter === "all" || i.type === filter).map((i) => {
-            const meta = INCIDENT_TYPES[i.type] || { label: i.type, icon: "AlertTriangle", emoji: "⚠️" };
+            const meta = INCIDENT_TYPES[i.type] || { label: i.type, icon: "AlertTriangle" };
             const Icon = getIncidentIcon(meta.icon);
             return (
               <button
@@ -155,7 +158,7 @@ export default function MapView() {
       <Sheet open={!!selected} onOpenChange={(o) => !o && setSelectedId(null)}>
         <SheetContent side="bottom" className="rounded-t-3xl max-h-[80vh]">
           {selected && (() => {
-            const meta = INCIDENT_TYPES[selected.type] || { label: selected.type, icon: "AlertTriangle", emoji: "⚠️" };
+            const meta = INCIDENT_TYPES[selected.type] || { label: selected.type, icon: "AlertTriangle" };
             const Icon = getIncidentIcon(meta.icon);
             return (
               <>
@@ -221,11 +224,14 @@ export default function MapView() {
                 {selected.transport_modes?.length > 0 && (
                   <div className="mt-3 flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs text-muted-foreground">Concerne :</span>
-                    {selected.transport_modes.map((m) => (
-                      <span key={m} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs font-medium">
-                        {TRANSPORT_MODES[m]?.emoji} {TRANSPORT_MODES[m]?.label || m}
-                      </span>
-                    ))}
+                    {selected.transport_modes.map((m) => {
+                      const TIcon = getIncidentIcon(TRANSPORT_MODES[m]?.icon);
+                      return (
+                        <span key={m} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs font-medium">
+                          <TIcon className="w-3 h-3" /> {TRANSPORT_MODES[m]?.label || m}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
                 <div className="mt-5 flex gap-2">
@@ -233,7 +239,7 @@ export default function MapView() {
                     className={`flex-1 rounded-xl ${selected.confirmed_by_me ? "bg-accent text-accent-foreground" : "bg-foreground text-background"}`}
                     onClick={handleConfirmSelected}
                   >
-                    {selected.confirmed_by_me ? "Confirmé ✓" : "Confirmer"}
+                    {selected.confirmed_by_me ? "Confirmé" : "Confirmer"}
                   </Button>
                   <Button variant="outline" className="flex-1 rounded-xl" onClick={handleShareSelected}>
                     <Share2 className="w-4 h-4 mr-2" /> Partager
