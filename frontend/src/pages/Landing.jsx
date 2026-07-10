@@ -150,7 +150,7 @@ const Hero = () => {
               </div>
               <div>
                 <p className="text-xs font-semibold">Accident · Bd de France</p>
-                <p className="text-[10px] text-muted-foreground">Confirmé par 12 personnes</p>
+                <p className="text-[10px] text-muted-foreground">Confirmé par la communauté</p>
               </div>
             </motion.div>
 
@@ -165,7 +165,7 @@ const Hero = () => {
               </div>
               <div>
                 <p className="text-xs font-semibold">Zone confirmée</p>
-                <p className="text-[10px] text-muted-foreground">18 signalements croisés</p>
+                <p className="text-[10px] text-muted-foreground">Signalements croisés</p>
               </div>
             </motion.div>
 
@@ -398,33 +398,32 @@ const HowItWorks = () => (
   </section>
 );
 
-const Testimonials = () => {
+const Trust = () => {
   const items = [
-    { name: "Adama Koné", role: "Chauffeur VTC · Abidjan", text: "Avant je perdais 1h dans les bouchons. Maintenant j'anticipe. La commu est ultra réactive.", avatar: "AK" },
-    { name: "Salimata Traoré", role: "Directrice logistique, NSIA Transport", text: "On a intégré les alertes RoutePulse dans nos tournées. -18% de retards sur 3 mois.", avatar: "ST" },
-    { name: "Dr. Yao B.", role: "Chercheur en mobilité urbaine", text: "C'est la première fois qu’on a une base de données exploitable sur l’état réel des routes.", avatar: "YB" },
+    { icon: Layers, title: "Fiabilisé, pas du bruit", text: "Une alerte devient « confirmée » quand plusieurs signalements indépendants convergent sur une même zone. L'IA écarte le signalement isolé ou malveillant." },
+    { icon: ShieldCheck, title: "Tes données restent à toi", text: "Position utilisée uniquement au moment du signalement. Anonymisation par défaut, aucun tracking permanent, aucune donnée personnelle revendue." },
+    { icon: Sparkles, title: "Gratuit, sans compte", text: "Signaler ne demande aucune inscription. L'app reste 100% gratuite pour les citoyens — c'est le cœur de la communauté." },
   ];
   return (
     <section className="py-20 sm:py-28">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl mx-auto text-center">
-          <Badge variant="outline" className="rounded-full border-accent/30 bg-accent/5 text-accent">Ils utilisent</Badge>
+          <Badge variant="outline" className="rounded-full border-accent/30 bg-accent/5 text-accent">Confiance</Badge>
           <h2 className="mt-3 font-display text-3xl sm:text-4xl font-semibold text-foreground">
-            Testé par ceux qui vivent la route.
+            Une info fiable. Des données respectées.
           </h2>
+          <p className="mt-4 text-muted-foreground">
+            Pas de promesses en l'air : voici comment RoutePulse mérite ta confiance dès le premier signalement.
+          </p>
         </div>
         <div className="mt-10 grid md:grid-cols-3 gap-4">
           {items.map((t) => (
-            <Card key={t.name} className="rounded-2xl p-6 border-border bg-card flex flex-col">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-full bg-gradient-hero text-primary-foreground flex items-center justify-center font-semibold">{t.avatar}</div>
-                <div>
-                  <p className="font-semibold text-sm">{t.name}</p>
-                  <p className="text-xs text-muted-foreground">{t.role}</p>
-                </div>
+            <Card key={t.title} className="rounded-2xl p-6 border-border bg-card flex flex-col">
+              <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <t.icon className="w-5 h-5" />
               </div>
-              <p className="mt-4 text-sm text-muted-foreground leading-relaxed flex-1">« {t.text} »</p>
-              <div className="mt-4 flex gap-0.5 text-primary">{"★".repeat(5).split("").map((s,i)=><span key={i}>{s}</span>)}</div>
+              <h3 className="mt-4 font-display text-lg font-semibold text-foreground">{t.title}</h3>
+              <p className="mt-2 text-sm text-muted-foreground leading-relaxed flex-1">{t.text}</p>
             </Card>
           ))}
         </div>
@@ -519,7 +518,7 @@ export default function Landing() {
       <LiveMapSection />
       <CommunitySection />
       <HowItWorks />
-      <Testimonials />
+      <Trust />
       <FAQ />
       <CTA />
       <Footer />
