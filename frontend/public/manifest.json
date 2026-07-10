@@ -1,0 +1,26 @@
+{
+  "short_name": "RoutePulse",
+  "name": "RoutePulse CI — mobilité d'Abidjan",
+  "description": "Signale, consulte et anticipe le trafic, les accidents et les inondations à Abidjan en temps réel.",
+  "lang": "fr",
+  "dir": "ltr",
+  "icons": [
+    { "src": "favicon-64.png", "sizes": "64x64", "type": "image/png" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "start_url": "/app/carte",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E1726",
+  "theme_color": "#F65A2C",
+  "categories": ["navigation", "travel", "utilities"],
+  "shortcuts": [
+    { "name": "Signaler un incident", "short_name": "Signaler", "url": "/app/signaler",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Avant de partir", "short_name": "Trajet", "url": "/app/trajet",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ]
+}

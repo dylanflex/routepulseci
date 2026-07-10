@@ -2,6 +2,7 @@ import React, { Suspense, useMemo, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { BottomNav } from "@/components/routepulse/BottomNav";
 import CopilotChat from "@/components/routepulse/CopilotChat";
+import Onboarding from "@/components/routepulse/Onboarding";
 import { useAppData } from "@/context/AppDataContext";
 import { INCIDENT_TYPES } from "@/lib/mockData";
 import { formatRelativeTime } from "@/lib/time";
@@ -64,6 +65,9 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* First-run mobile onboarding (self-gates on localStorage) */}
+      <Onboarding />
+
       {/* Top bar */}
       <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-lg border-b border-border">
         <div className="mx-auto max-w-2xl px-4 h-14 flex items-center justify-between">
