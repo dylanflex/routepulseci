@@ -3,10 +3,16 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { BottomNav } from "@/components/routepulse/BottomNav";
 import CopilotChat from "@/components/routepulse/CopilotChat";
 import Onboarding from "@/components/routepulse/Onboarding";
+import ConsentGate from "@/components/routepulse/ConsentGate";
+import ProximityAlerts from "@/components/routepulse/ProximityAlerts";
+import InstallPrompt from "@/components/routepulse/InstallPrompt";
 import { useAppData } from "@/context/AppDataContext";
 import { INCIDENT_TYPES } from "@/lib/mockData";
 import { formatRelativeTime } from "@/lib/time";
-import { Activity, Bell, ChevronLeft, Search } from "lucide-react";
+import { distanceMeters } from "@/lib/geo";
+import { useWatchPosition } from "@/lib/useWatchPosition";
+import { PROXIMITY_RADIUS_M } from "@/lib/proximity";
+import { Activity, Bell, ChevronLeft, Search, MapPin } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
@@ -20,7 +26,7 @@ const typeLabel = (type) => INCIDENT_TYPES[type]?.label || type;
 export default function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { incidents, posts } = useAppData();
+  const { incidents, posts, confirmIncident } = useAppData();
   const { user } = useAuth();
   const isDetail = pathname.includes("/feed/") || pathname.includes("/parametres");
   const backTo = pathname.includes("/parametres") ? "/app/profil" : "/app/feed";
@@ -28,17 +34,32 @@ export default function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  const recentIncidents = useMemo(
-    () => [...incidents].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 6),
-    [incidents],
-  );
   // Logged-out users have no setting to read yet -- default to on, same as
   // the server-side column default for a fresh account.
   const notificationsEnabled = user ? user.notify_nearby_incidents : true;
+
+  // One geolocation watcher for the whole app, gated on the notifications
+  // setting. Everything proximity-related (the bell, the confirm cards) reads
+  // from this single position fix.
+  const position = useWatchPosition(notificationsEnabled);
+
+  // "Notifications" now means "what's within PROXIMITY_RADIUS_M of me", not a
+  // firehose of every recent report across Abidjan — nearest first.
+  const nearby = useMemo(() => {
+    if (!position) return [];
+    return incidents
+      .map((i) => ({ ...i, _dist: distanceMeters(position.lat, position.lng, i.lat, i.lng) }))
+      .filter((i) => i._dist <= PROXIMITY_RADIUS_M)
+      .sort((a, b) => a._dist - b._dist)
+      .slice(0, 8);
+  }, [incidents, position]);
+
   const hasUnread = useMemo(
-    () => notificationsEnabled && incidents.some((i) => Date.now() - new Date(i.created_at).getTime() < RECENT_MS),
-    [incidents, notificationsEnabled],
+    () => notificationsEnabled && nearby.some((i) => Date.now() - new Date(i.created_at).getTime() < RECENT_MS),
+    [nearby, notificationsEnabled],
   );
+
+  const fmtDist = (m) => (m < 950 ? `${Math.round(m / 50) * 50} m` : `${(m / 1000).toFixed(1)} km`);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -65,8 +86,11 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* First-run mobile onboarding (self-gates on localStorage) */}
+      {/* First-run mobile onboarding, then a mandatory data-collection consent
+          gate (both self-gate on localStorage; consent sits just under the
+          onboarding overlay so it appears once the intro is dismissed). */}
       <Onboarding />
+      <ConsentGate />
 
       {/* Top bar */}
       <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-lg border-b border-border">
@@ -101,20 +125,34 @@ export default function AppShell() {
               </PopoverTrigger>
               <PopoverContent align="end" className="w-80 p-0 rounded-2xl overflow-hidden">
                 <div className="px-4 py-3 border-b border-border">
-                  <p className="font-semibold text-sm">Notifications</p>
+                  <p className="font-semibold text-sm">Alertes à proximité</p>
+                  <p className="text-xs text-muted-foreground">Dans un rayon d’1 km autour de toi</p>
                 </div>
                 <div className="max-h-80 overflow-y-auto">
-                  {recentIncidents.length === 0 ? (
-                    <p className="px-4 py-6 text-sm text-muted-foreground text-center">Rien de neuf pour l’instant.</p>
+                  {!notificationsEnabled ? (
+                    <p className="px-4 py-6 text-sm text-muted-foreground text-center">
+                      Alertes de proximité désactivées. Active-les dans les paramètres.
+                    </p>
+                  ) : !position ? (
+                    <p className="px-4 py-6 text-sm text-muted-foreground text-center">
+                      Active ta localisation pour recevoir les alertes près de toi.
+                    </p>
+                  ) : nearby.length === 0 ? (
+                    <p className="px-4 py-6 text-sm text-muted-foreground text-center">Rien à signaler près de toi.</p>
                   ) : (
-                    recentIncidents.map((i) => (
+                    nearby.map((i) => (
                       <button
                         key={i.id}
                         onClick={() => navigate("/app/carte")}
                         className="w-full text-left px-4 py-3 hover:bg-muted transition-colors border-b border-border/60 last:border-0"
                       >
-                        <p className="text-sm font-medium truncate">{typeLabel(i.type)} · {i.road}</p>
-                        <p className="text-xs text-muted-foreground">{formatRelativeTime(i.created_at)} · {i.confirmed} confirm.</p>
+                        <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                          {typeLabel(i.type)} · {i.road}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          à {fmtDist(i._dist)} · {formatRelativeTime(i.created_at)} · {i.confirmed} confirm.
+                        </p>
                       </button>
                     ))
                   )}
@@ -138,6 +176,18 @@ export default function AppShell() {
 
       {/* Conversational AI copilot — floating, available across the app shell */}
       <CopilotChat />
+
+      {/* Proximity confirm-requests: a fresh report within 1 km asks the user
+          to confirm it. Single shared position fix from useWatchPosition. */}
+      <ProximityAlerts
+        position={position}
+        incidents={incidents}
+        confirmIncident={confirmIncident}
+        enabled={notificationsEnabled}
+      />
+
+      {/* PWA install invitation (Android/Chrome native prompt, iOS manual steps) */}
+      <InstallPrompt />
 
       {/* Search */}
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>

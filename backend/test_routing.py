@@ -120,6 +120,17 @@ def test_geocode_gazetteer_fallback_when_no_key(monkeypatch):
     assert abs(got["lat"] - 5.3240) < 0.02  # resolved to Plateau
 
 
+def test_reverse_geocode_gazetteer_fallback_when_no_provider(monkeypatch):
+    # With every provider key off, a GPS fix still resolves to a place name via
+    # nearest_commune rather than the literal "Ma position" or raw coordinates.
+    monkeypatch.setattr(routing, "GRAPHHOPPER_KEY", "")
+    routing._REVERSE_CACHE.clear()
+    routing._PROVIDER_COOLDOWN.clear()
+    got = asyncio.run(routing.reverse_geocode(5.36, -3.98, client=None))
+    assert got["name"] == "Cocody"  # snapped to the nearest known district
+    assert got["lat"] == 5.36 and got["lng"] == -3.98
+
+
 class _FakeResponse:
     def __init__(self, payload):
         self._payload = payload

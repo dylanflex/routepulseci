@@ -1551,6 +1551,14 @@ async def geocode_suggest(q: str):
         return await routing.suggest(q, client)
 
 
+@api_router.get("/geocode/reverse")
+async def geocode_reverse(lat: float, lng: float):
+    """Reverse-geocode a GPS fix to a human address — lets the trip planner
+    show the actual street/district for 'Ma position' instead of raw coords."""
+    async with httpx.AsyncClient() as client:
+        return await routing.reverse_geocode(lat, lng, client)
+
+
 # --- Posts -----------------------------------------------------------
 
 

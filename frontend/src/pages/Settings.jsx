@@ -100,7 +100,7 @@ export default function Settings() {
       <SettingsSection icon={Bell} title="Notifications" hint="Alertes autour de toi">
         <SettingsRow
           label="Alertes à proximité"
-          description="Un point rouge sur la cloche quand un incident récent apparaît près de toi."
+          description="Quand un incident est signalé dans un rayon d'1 km, reçois une notification pour le confirmer."
           checked={user.notify_nearby_incidents}
           onCheckedChange={(v) => toggleSetting("notify_nearby_incidents", v)}
         />

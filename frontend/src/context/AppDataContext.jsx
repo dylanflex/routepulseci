@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { getCurrentPosition } from "@/lib/geo";
+import { markSelfReported } from "@/lib/proximity";
 
 const AppDataContext = createContext(null);
 
@@ -115,6 +116,9 @@ function AppData({ children }) {
       return { incident, post };
     },
     onSuccess: ({ incident, post }) => {
+      // You just reported this — never fire a proximity confirm-request at
+      // yourself for your own report.
+      markSelfReported(incident.id);
       qc.setQueryData(["incidents"], (prev = []) => [incident, ...prev]);
       if (post) qc.setQueryData(["posts"], (prev = []) => [post, ...prev]);
     },

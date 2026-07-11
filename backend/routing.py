@@ -552,6 +552,68 @@ async def _liq_route(key, points, client):
     }
 
 
+# Reverse geocoding (a GPS fix -> a human address). Powers the trip planner's
+# "Ma position" showing the actual street/district instead of the literal words.
+# Same chain + offline fallback (nearest_commune) as forward geocoding.
+async def _gh_reverse(key, lat, lng, client):
+    r = await client.get(
+        f"{GRAPHHOPPER_BASE}/geocode",
+        params={"reverse": "true", "point": f"{lat},{lng}", "locale": "fr", "key": key},
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    for hit in r.json().get("hits") or []:
+        return {"name": _hit_label(hit) or "Ma position", "lat": lat, "lng": lng}
+    return None
+
+
+async def _geoapify_reverse(key, lat, lng, client):
+    r = await client.get(
+        f"{_GEOAPIFY}/geocode/reverse",
+        params={"lat": lat, "lon": lng, "lang": "fr", "limit": 1, "apiKey": key},
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    for f in r.json().get("features") or []:
+        pr = f.get("properties") or {}
+        return {"name": pr.get("formatted") or "Ma position", "lat": lat, "lng": lng}
+    return None
+
+
+async def _ors_reverse(key, lat, lng, client):
+    r = await client.get(
+        f"{_ORS}/geocode/reverse",
+        params={"api_key": key, "point.lat": lat, "point.lon": lng, "size": 1},
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    for f in r.json().get("features") or []:
+        label = (f.get("properties") or {}).get("label")
+        return {"name": label or "Ma position", "lat": lat, "lng": lng}
+    return None
+
+
+async def _liq_reverse(key, lat, lng, client):
+    r = await client.get(
+        f"{_LIQ}/reverse",
+        params={
+            "key": key,
+            "lat": lat,
+            "lon": lng,
+            "format": "json",
+            "accept-language": "fr",
+        },
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, dict):
+        return None
+    parts = [p.strip() for p in (data.get("display_name") or "").split(",")]
+    label = ", ".join(p for p in parts[:2] if p)
+    return {"name": label or "Ma position", "lat": lat, "lng": lng}
+
+
 def _provider_available(name: str) -> bool:
     return _PROVIDER_COOLDOWN.get(name, 0.0) <= time.monotonic()
 
@@ -570,6 +632,7 @@ def _providers() -> list:
             "geocode": _gh_geocode,
             "suggest": _gh_suggest,
             "route": _gh_route,
+            "reverse": _gh_reverse,
         },
         {
             "name": "geoapify",
@@ -577,6 +640,7 @@ def _providers() -> list:
             "geocode": _geoapify_geocode,
             "suggest": _geoapify_suggest,
             "route": _geoapify_route,
+            "reverse": _geoapify_reverse,
         },
         {
             "name": "ors",
@@ -584,6 +648,7 @@ def _providers() -> list:
             "geocode": _ors_geocode,
             "suggest": _ors_suggest,
             "route": _ors_route,
+            "reverse": _ors_reverse,
         },
         {
             "name": "locationiq",
@@ -591,6 +656,7 @@ def _providers() -> list:
             "geocode": _liq_geocode,
             "suggest": _liq_suggest,
             "route": _liq_route,
+            "reverse": _liq_reverse,
         },
     ]
 
@@ -656,6 +722,9 @@ def _gazetteer_geocode(query: str) -> dict:
 # Process-lifetime cache; fine for a single instance (see _ROAD_SEGMENT_CACHE).
 _GEOCODE_CACHE: dict[str, dict] = {}
 _SUGGEST_CACHE: dict[str, List[dict]] = {}
+# Reverse lookups are keyed by coordinates rounded to ~11 m so a jittery GPS
+# fix doesn't miss the cache on every reading.
+_REVERSE_CACHE: dict[str, dict] = {}
 
 
 async def geocode(query: str, client: httpx.AsyncClient) -> dict:
@@ -679,6 +748,38 @@ async def geocode(query: str, client: httpx.AsyncClient) -> dict:
         result = _gazetteer_geocode(query)
 
     _GEOCODE_CACHE[cache_key] = result
+    return result
+
+
+# Providers append the country to a reverse label; RoutePulse is Abidjan-only so
+# it's always Côte d'Ivoire — drop it (and any city-only tail) for a tidy origin.
+_COUNTRY_TAILS = ("côte d'ivoire", "cote d'ivoire", "ivory coast")
+
+
+def _tidy_address(name: str) -> str:
+    parts = [p.strip() for p in (name or "").split(",")]
+    parts = [
+        p for p in parts if p and p.lower().replace("’", "'") not in _COUNTRY_TAILS
+    ]
+    return ", ".join(parts) or (name or "").strip()
+
+
+async def reverse_geocode(lat: float, lng: float, client: httpx.AsyncClient) -> dict:
+    """Resolve a GPS fix to a human address {name, lat, lng}. Falls back to the
+    nearest known Abidjan district so the planner's origin always reads as a
+    place, never a raw 'lat,lng' or the literal words 'Ma position'."""
+    cache_key = f"{round(lat, 4)},{round(lng, 4)}"
+    cached = _REVERSE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result = await _run_chain("reverse", lat, lng, client=client)
+    if result is None:
+        result = {"name": nearest_commune(lat, lng), "lat": lat, "lng": lng}
+    else:
+        result["name"] = _tidy_address(result.get("name"))
+
+    _REVERSE_CACHE[cache_key] = result
     return result
 
 

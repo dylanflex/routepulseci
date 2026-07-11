@@ -10,7 +10,7 @@ import { INCIDENT_TYPES, ABIDJAN_CENTER } from "@/lib/mockData";
 import { trafficColorHex, RECO_STYLE } from "@/lib/traffic";
 import { useAppData } from "@/context/AppDataContext";
 import { api } from "@/lib/api";
-import { getCurrentPosition } from "@/lib/geo";
+import { getCurrentPosition, describePosition } from "@/lib/geo";
 import { speak, primeSpeech } from "@/lib/voice";
 
 // Full Mapbox GL JS. Public token (pk.*) is safe to ship client-side; it comes
@@ -104,8 +104,8 @@ export const TrafficMap = ({
     setPlannerLocating(true);
     try {
       const { lat, lng } = await getCurrentPosition();
-      setPlannerFrom("Ma position");
       setPlannerFromSend(`${lat},${lng}`);
+      setPlannerFrom(await describePosition(lat, lng));
     } catch {
       toast.error("Impossible de récupérer ta position");
     } finally {

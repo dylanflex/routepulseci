@@ -68,4 +68,5 @@ export const api = {
   // `signal` lets callers abort a stale in-flight suggestion request (see
   // PlaceField) instead of letting it race a newer one to the UI.
   suggestPlaces: (q, { signal } = {}) => request(`/geocode/suggest?q=${encodeURIComponent(q)}`, { signal }),
+  reverseGeocode: (lat, lng) => request(`/geocode/reverse?lat=${lat}&lng=${lng}`),
 };

@@ -7,7 +7,7 @@ import { INCIDENT_TYPES } from "@/lib/mockData";
 import { getIncidentIcon, trafficColorVar, RECO_STYLE } from "@/lib/traffic";
 import { formatRelativeTime } from "@/lib/time";
 import { api } from "@/lib/api";
-import { getCurrentPosition } from "@/lib/geo";
+import { getCurrentPosition, describePosition } from "@/lib/geo";
 import { speak, primeSpeech } from "@/lib/voice";
 import { toast } from "sonner";
 import {
@@ -47,8 +47,9 @@ export default function Trajet() {
     setLocating(true);
     try {
       const { lat, lng } = await getCurrentPosition();
-      setFrom("Ma position");
+      // Send the precise coords to the scan; show the resolved address to the user.
       setFromSend(`${lat},${lng}`);
+      setFrom(await describePosition(lat, lng));
       toast.success("Position récupérée");
     } finally {
       setLocating(false);
