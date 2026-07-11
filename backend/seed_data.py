@@ -148,10 +148,10 @@ RECURRING_PATTERNS = [
 # Posts: (username, location, type, severity, text, image, likes, shares,
 #         confirmed, age_minutes, [comments])
 # Each comment: (username, text, likes, age_minutes)
-_IMG_JAM = "https://images.unsplash.com/photo-1708347456872-6ebd105740de?w=900&q=80"
-_IMG_FLOOD = (
-    "https://images.pexels.com/photos/7381785/pexels-photo-7381785.jpeg?w=900&q=80"
-)
+# Real citizen incident photos, served from the frontend's public/seed folder.
+_IMG_ACCIDENT = "/seed/accident.jpg"
+_IMG_POTHOLE = "/seed/pothole1.jpg"
+_IMG_POTHOLE2 = "/seed/pothole2.jpg"
 
 POSTS = [
     (
@@ -160,7 +160,7 @@ POSTS = [
         "jam",
         "blocked",
         "Bouchon monstre sur la Riviera 3 après l'accident. Prendre le contournement par la Palmeraie 🙏 Ça n'avance plus depuis 20 min.",
-        _IMG_JAM,
+        None,
         142,
         34,
         18,
@@ -187,7 +187,7 @@ POSTS = [
         "degraded",
         "dense",
         "Énorme nid de poule à Yop. Deux motos déjà tombées. Attention en venant du marché !",
-        None,
+        _IMG_POTHOLE2,
         87,
         19,
         9,
@@ -208,7 +208,7 @@ POSTS = [
         "flood",
         "danger",
         "Inondation sévère au Plateau après la pluie. La lagune déborde côté Boulay. Évitez absolument.",
-        _IMG_FLOOD,
+        None,
         312,
         128,
         42,
@@ -224,7 +224,7 @@ POSTS = [
         "accident",
         "blocked",
         "Collision entre un woro-woro et une berline au carrefour SOLIBRA. Les secours sont sur place.",
-        None,
+        _IMG_ACCIDENT,
         54,
         6,
         5,
@@ -293,7 +293,7 @@ POSTS = [
         "flood",
         "danger",
         "Route inondée à Gonzagueville, l'eau arrive au niveau des portières. Ne tentez pas de passer en berline.",
-        _IMG_FLOOD,
+        None,
         221,
         89,
         15,
@@ -309,7 +309,7 @@ POSTS = [
         "degraded",
         "dense",
         "La route de la 8e tranche est dans un état catastrophique après les pluies. Nids de poule partout.",
-        None,
+        _IMG_POTHOLE,
         74,
         15,
         13,
